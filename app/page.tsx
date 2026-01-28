@@ -46,7 +46,8 @@ export default function Home() {
   const [presets, setPresets] = useState<Preset[]>(defaultPresets);
   const [isMatching, setIsMatching] = useState(false);
 
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
+  const isLoadingSession = status === "loading";
 
   const requestRef = useRef<number>(null);
 
@@ -260,7 +261,9 @@ export default function Home() {
           <p className="sub-logo">Professional Audio Spectrum Processor</p>
         </div>
         <div className="auth-zone">
-          {session ? (
+          {isLoadingSession ? (
+            <span className="user-name">Loading...</span>
+          ) : session ? (
             <>
               <span className="user-name">{session.user?.name}</span>
               <button onClick={() => signOut()} className="auth-button">Logout</button>
