@@ -49,6 +49,8 @@ export default function Home() {
   const { data: session, status } = useSession();
   const isLoadingSession = status === "loading";
 
+  const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
+
   const requestRef = useRef<number>(null);
 
   useEffect(() => {
@@ -64,6 +66,54 @@ export default function Home() {
     };
     init();
   }, []);
+
+  // Load tracks from Supabase
+  useEffect(() => {
+    if (isLoadingSession) return;
+
+    const fetchTracks = async () => {
+      if (session?.user?.email) {
+        setIsLoadingLibrary(true);
+        console.log("Fetching tracks for:", session.user.email);
+
+        const { data: trackData, error: dbError } = await supabase
+          .from("tracks")
+          .select("*")
+          .eq("user_email", session.user.email)
+          .order("created_at", { ascending: false });
+
+        if (dbError) {
+          console.error("Error fetching tracks from DB:", dbError);
+        } else if (trackData) {
+          const loadedTracks: Track[] = [];
+          for (const t of trackData) {
+            try {
+              // StorageからURL取得 (または直接Public URL生成)
+              const { data: { publicUrl } } = supabase.storage
+                .from("eq-lab-tracks")
+                .getPublicUrl(t.file_path);
+
+              const buffer = await loadAudio(publicUrl);
+              loadedTracks.push({
+                id: t.id,
+                name: t.name,
+                buffer
+              });
+            } catch (e) {
+              console.error(`Failed to load track ${t.name}:`, e);
+            }
+          }
+          // Default track is already there, append
+          setLibrary(prev => {
+            const defaults = prev.filter(t => t.id === "default");
+            return [...defaults, ...loadedTracks];
+          });
+        }
+        setIsLoadingLibrary(false);
+      }
+    };
+    fetchTracks();
+  }, [session, isLoadingSession]);
 
   // Load presets from Supabase on mount/session change
   useEffect(() => {
@@ -120,8 +170,42 @@ export default function Home() {
     const file = e.target.files?.[0];
     if (file) {
       const buffer = await loadAudio(file);
+      let trackId = Math.random().toString(36).substr(2, 9);
+
+      // If user is logged in and mode is library, upload to Supabase
+      if (session?.user?.email && mode === "library") {
+        try {
+          const filePath = `${session.user.email}/${Date.now()}-${file.name}`;
+
+          // 1. Storageにアップロード
+          const { error: uploadError } = await supabase.storage
+            .from("eq-lab-tracks")
+            .upload(filePath, file);
+
+          if (uploadError) throw uploadError;
+
+          // 2. DBにメタデータ保存
+          const { data: dbData, error: dbError } = await supabase
+            .from("tracks")
+            .insert([{
+              user_email: session.user.email,
+              name: file.name,
+              file_path: filePath
+            }])
+            .select();
+
+          if (dbError) throw dbError;
+          if (dbData) trackId = dbData[0].id;
+
+          alert("ライブラリに永続化保存したよ！");
+        } catch (err: any) {
+          console.error("Upload failed:", err);
+          alert("クラウドへの保存に失敗したけど、一時的には使えるよ: " + err.message);
+        }
+      }
+
       const newTrack: Track = {
-        id: Math.random().toString(36).substr(2, 9),
+        id: trackId,
         name: file.name,
         buffer
       };
@@ -130,13 +214,12 @@ export default function Home() {
         setLibrary(prev => [...prev, newTrack]);
       } else if (mode === "source") {
         setSourceTrack(newTrack);
-        setCurrentTrack(newTrack); // Auto-select for playback
+        setCurrentTrack(newTrack);
         setProgress(0);
       } else if (mode === "target") {
         setTargetTrack(newTrack);
       }
 
-      // Reset input value to allow re-uploading the same file if needed
       e.target.value = "";
     }
   };
@@ -470,16 +553,27 @@ export default function Home() {
       </footer>
 
       <style jsx>{`
+        :global(:root) {
+          --accent: #00e5ff;
+          --accent-glow: rgba(0, 229, 255, 0.3);
+          --bg-dark: #0a0a0c;
+          --panel-bg: rgba(255, 255, 255, 0.04);
+          --border: rgba(255, 255, 255, 0.08);
+          --text-main: #ffffff;
+          --text-dim: rgba(255, 255, 255, 0.5);
+        }
+
         .main-layout {
           min-height: 100vh;
-          background: radial-gradient(circle at 50% 50%, #1a1a2e 0%, #0a0a0c 100%);
-          color: white;
+          background: radial-gradient(circle at 50% 0%, #1a1a2e 0%, var(--bg-dark) 100%);
+          color: var(--text-main);
           display: flex;
           flex-direction: column;
           padding: 20px;
           gap: 20px;
-          max-width: 1600px;
+          max-width: 1400px;
           margin: 0 auto;
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
         }
 
         .main-header {
@@ -487,236 +581,231 @@ export default function Home() {
           justify-content: space-between;
           align-items: center;
           padding: 10px 0;
+          border-bottom: 1px solid var(--border);
+          margin-bottom: 10px;
         }
 
-        .logo-text { font-size: 2rem; margin: 0; color: var(--accent); letter-spacing: 0.1em; }
-        .sub-logo { margin: 0; opacity: 0.5; font-size: 0.8rem; }
+        .logo-text { 
+          font-size: 1.8rem; 
+          margin: 0; 
+          background: linear-gradient(to right, #00e5ff, #00a2ff);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          font-weight: 800;
+          letter-spacing: -0.02em;
+        }
+        .sub-logo { margin: 0; opacity: 0.5; font-size: 0.75rem; letter-spacing: 0.1em; }
 
         .content-grid {
           display: grid;
-          grid-template-columns: 300px 1fr 300px;
-          gap: 20px;
+          grid-template-columns: 320px 1fr 300px;
+          gap: 24px;
           flex: 1;
         }
 
-        .section-header {
+        .glass-panel {
+          background: var(--panel-bg);
+          backdrop-filter: blur(20px);
+          -webkit-backdrop-filter: blur(20px);
+          border: 1px solid var(--border);
+          border-radius: 20px;
+          padding: 24px;
           display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 20px;
+          flex-direction: column;
+          box-shadow: 0 8px 32px rgba(0,0,0,0.4);
         }
 
         .section-title {
-          font-size: 0.9rem;
-          font-weight: 600;
-          letter-spacing: 0.1em;
-          opacity: 0.8;
-          border-left: 3px solid var(--accent);
-          padding-left: 10px;
-          margin: 0;
+          font-size: 0.85rem;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.15em;
+          color: var(--accent);
+          margin-bottom: 20px;
+          display: flex;
+          align-items: center;
+          gap: 10px;
         }
+        .section-title::after { content: ''; height: 1px; flex: 1; background: var(--border); }
 
-        .section-desc { font-size: 0.7rem; opacity: 0.6; margin-bottom: 15px; }
-
-        .glass-panel {
-          background: rgba(255, 255, 255, 0.03);
-          backdrop-filter: blur(10px);
-          border: 1px solid rgba(255, 255, 255, 0.05);
-          border-radius: 16px;
-          padding: 20px;
-        }
-
-        /* Library & Matching Slots */
+        /* Track & Preset Lists */
         .track-list, .preset-list {
           flex: 1;
           overflow-y: auto;
           display: flex;
           flex-direction: column;
-          gap: 6px;
-          margin-bottom: 15px;
-          max-height: 300px;
+          gap: 8px;
+          margin-bottom: 20px;
+          min-height: 150px;
         }
 
         .library-item, .preset-item {
-          padding: 12px;
-          border-radius: 8px;
+          padding: 14px 18px;
+          border-radius: 12px;
           cursor: pointer;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          font-size: 0.85rem;
-          background: rgba(255, 255, 255, 0.02);
-          transition: all 0.2s;
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid transparent;
+          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+          font-size: 0.9rem;
         }
 
-        .library-item:hover, .preset-item:hover { background: rgba(255, 255, 255, 0.07); }
-        .library-item.active { background: rgba(0, 229, 255, 0.1); color: var(--accent); }
-
-        .preset-item { justify-content: space-between; }
-        .preset-info { display: flex; align-items: center; gap: 10px; }
-        .delete-btn {
-          background: none;
-          border: none;
-          color: rgba(255, 255, 255, 0.2);
-          font-size: 1.2rem;
-          cursor: pointer;
-          line-height: 1;
-          padding: 0 4px;
-          transition: color 0.2s;
+        .library-item:hover, .preset-item:hover {
+          background: rgba(255, 255, 255, 0.08);
+          border-color: rgba(255, 255, 255, 0.1);
+          transform: translateY(-1px);
         }
-        .delete-btn:hover { color: #ff4d4d; }
 
-        .matching-controls { display: flex; flex-direction: column; gap: 15px; margin-bottom: 20px; }
-        .slot-label { font-size: 0.75rem; opacity: 0.5; display: block; margin-bottom: 4px; }
-        .slot-name { font-size: 0.8rem; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .library-item.active {
+          background: rgba(0, 229, 255, 0.1);
+          border-color: var(--accent);
+          color: var(--accent);
+        }
 
-        /* Buttons */
-        .upload-label {
-          display: block;
-          padding: 12px;
-          background: var(--accent);
-          color: black;
-          text-align: center;
-          border-radius: 8px;
+        /* Buttons and Controls */
+        .upload-label, .match-button {
+          padding: 16px;
+          border-radius: 14px;
           font-weight: 700;
-          font-size: 0.8rem;
+          font-size: 0.85rem;
           cursor: pointer;
+          transition: all 0.2s;
+          text-align: center;
+          border: none;
         }
 
-        .upload-label.secondary { background: rgba(255, 255, 255, 0.05); color: white; border: 1px solid rgba(255, 255, 255, 0.1); padding: 8px; font-size: 0.75rem; }
+        .upload-label { background: white; color: black; }
+        .upload-label:active { transform: scale(0.98); }
 
         .match-button {
-          width: 100%;
-          padding: 14px;
           background: linear-gradient(135deg, #00e5ff, #00a2ff);
-          border: none;
-          border-radius: 8px;
           color: black;
-          font-weight: 700;
-          cursor: pointer;
+          box-shadow: 0 4px 15px var(--accent-glow);
         }
+        .match-button:disabled { opacity: 0.3; cursor: not-allowed; box-shadow: none; }
 
-        .reset-button, .icon-button {
-          background: rgba(255,255,255,0.05);
-          border: 1px solid rgba(255,255,255,0.1);
-          color: white;
-          padding: 6px 12px;
-          border-radius: 6px;
-          font-size: 0.75rem;
-          cursor: pointer;
-        }
-
-        .add-button {
-          width: 28px;
-          height: 28px;
-          border-radius: 50%;
-          border: 1px solid var(--accent);
-          background: transparent;
-          color: var(--accent);
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        /* EQ Container */
+        /* EQ Styles */
         .eq-scroll-container {
           overflow-x: auto;
-          padding: 20px 0 40px 0;
-          mask-image: linear-gradient(to right, transparent, black 5%, black 95%, transparent);
+          padding: 10px 0 30px 0;
+          scrollbar-width: none; /* Hide scrollbar Firefox */
         }
+        .eq-scroll-container::-webkit-scrollbar { display: none; } /* Hide scrollbar Chrome/Safari */
 
-        .eq-container {
-          display: flex;
-          gap: 4px;
-          min-width: max-content;
-        }
+        .eq-container { display: flex; gap: 8px; padding: 0 10px; }
+        .eq-column { width: 40px; display: flex; flex-direction: column; align-items: center; gap: 15px; }
 
-        .eq-column {
-          width: 36px;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 12px;
-        }
+        .eq-value { font-size: 0.7rem; color: var(--accent); font-family: 'JetBrains Mono', monospace; }
+        .slider-wrapper { height: 260px; position: relative; width: 40px; }
 
-        .eq-value { font-size: 0.7rem; color: var(--accent); height: 14px; font-family: monospace; }
-        .slider-wrapper { height: 280px; position: relative; width: 36px; }
-
-        .vertical-slider {
+        /* Custom Range Input */
+        input[type="range"].vertical-slider {
           -webkit-appearance: none;
-          width: 240px;
-          height: 6px;
-          background: rgba(255, 255, 255, 0.08);
+          width: 260px;
+          height: 8px;
+          background: rgba(255, 255, 255, 0.05);
+          border-radius: 4px;
           position: absolute;
           top: 50%;
           left: 50%;
           transform: translate(-50%, -50%) rotate(-90deg);
-          border-radius: 3px;
         }
 
-        .eq-freq { font-size: 0.65rem; opacity: 0.4; transform: rotate(-45deg); margin-top: 10px; }
+        input[type="range"]::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          width: 20px;
+          height: 20px;
+          background: white;
+          border-radius: 50%;
+          box-shadow: 0 0 10px rgba(0,0,0,0.5);
+          cursor: pointer;
+          border: 2px solid var(--accent);
+        }
 
-        /* Controls Output */
-        .additional-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        .control-group { background: rgba(255, 255, 255, 0.02); padding: 16px; border-radius: 12px; }
-        .group-title { font-size: 0.75rem; margin-top: 0; margin-bottom: 12px; opacity: 0.6; }
-        .slider-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; font-size: 0.8rem; }
-        .slider-row input { flex: 1; height: 4px; }
-        .val-text { width: 35px; text-align: right; opacity: 0.5; font-size: 0.75rem; }
+        .eq-freq { font-size: 0.65rem; color: var(--text-dim); transform: rotate(-45deg); margin-top: 10px; }
 
         /* Footer Player */
         .footer-player {
+          margin-top: auto;
           display: flex;
           align-items: center;
-          gap: 20px;
-          padding: 15px 30px;
+          gap: 24px;
+          padding: 20px 30px;
+          position: sticky;
+          bottom: 20px;
+          z-index: 100;
         }
 
         .play-button {
-          width: 56px;
-          height: 56px;
+          width: 64px;
+          height: 64px;
           border-radius: 50%;
           border: none;
           background: var(--accent);
           color: black;
-          font-size: 1.4rem;
+          font-size: 1.6rem;
           cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          box-shadow: 0 0 20px rgba(0, 229, 255, 0.3);
-          flex-shrink: 0;
+          box-shadow: 0 0 30px var(--accent-glow);
+          transition: all 0.2s;
+        }
+        .play-button:hover { transform: scale(1.05); }
+
+        .progress-container { flex: 1; }
+        .progress-info { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.9rem; }
+        .playing-name { font-weight: 600; color: var(--accent); }
+
+        /* Mobile Responsive */
+        @media (max-width: 1200px) {
+          .content-grid { grid-template-columns: 1fr 1fr; }
+          .main-area { grid-column: span 2; order: -1; }
         }
 
-        .progress-container { flex: 1; display: flex; flex-direction: column; gap: 6px; }
-        .progress-info { display: flex; justify-content: space-between; font-size: 0.85rem; }
-        .playing-name { color: var(--accent); font-weight: 500; }
-        .time-display { opacity: 0.5; font-family: monospace; }
-        .progress-bar { width: 100%; height: 6px; cursor: pointer; }
-
-        .auth-button { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; padding: 6px 16px; border-radius: 20px; font-size: 0.8rem; cursor: pointer; }
-        .user-name { font-size: 0.8rem; opacity: 0.7; margin-right: 10px; }
-
-        /* Mobile Adjustments */
-        @media (max-width: 1100px) {
-          .content-grid {
-            grid-template-columns: 1fr;
+        @media (max-width: 768px) {
+          .main-layout { padding: 12px; gap: 12px; }
+          .content-grid { grid-template-columns: 1fr; gap: 12px; }
+          .main-area { grid-column: span 1; }
+          
+          .logo-text { font-size: 1.4rem; }
+          
+          .glass-panel { padding: 16px; border-radius: 20px; }
+          
+          .footer-player {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            border-radius: 24px 24px 0 0;
+            padding: 16px 20px 32px 20px;
+            margin: 0;
           }
-          .right-sidebar { order: 3; }
-          .left-sidebar { order: 2; }
-          .main-area { order: 1; }
+
+          .play-button { width: 56px; height: 56px; }
+          
+          .eq-scroll-container { 
+            margin: 0 -16px; 
+            padding-left: 16px;
+            padding-right: 16px;
+          }
+
+          /* Increase slider touch area for mobile */
+          input[type="range"]::-webkit-slider-thumb {
+            width: 28px;
+            height: 28px;
+          }
+
+          .additional-controls { 
+            grid-template-columns: 1fr !important; 
+            gap: 12px; 
+          }
+          
+          .auth-zone { margin-left: auto; }
+          .user-name { font-size: 0.75rem; }
         }
 
-        @media (max-width: 600px) {
-          .main-layout { padding: 10px; }
-          .header-titles h1 { font-size: 1.5rem; }
-          .additional-controls { grid-template-columns: 1fr; }
-          .footer-player { padding: 10px 15px; }
-          .play-button { width: 44px; height: 44px; font-size: 1rem; }
-          .playing-name { font-size: 0.75rem; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-          .time-display { font-size: 0.7rem; }
-          .eq-scroll-container { padding-bottom: 30px; }
+        /* Specific fixes for iPhone "Safe Areas" */
+        @supports (padding: env(safe-area-inset-bottom)) {
+          .footer-player {
+            padding-bottom: calc(16px + env(safe-area-inset-bottom));
+          }
         }
       `}</style>
     </main>
