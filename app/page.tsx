@@ -139,6 +139,34 @@ export default function Home() {
     return () => { if (requestRef.current) cancelAnimationFrame(requestRef.current); };
   }, []);
 
+  // Media Session API Integration (iOS Control Center)
+  useEffect(() => {
+    if ("mediaSession" in navigator && currentTrack) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: currentTrack.name,
+        artist: "EQ LAB",
+        album: "Advanced Processor",
+        artwork: [
+          { src: "/favicon.ico", sizes: "192x192", type: "image/png" }
+        ],
+      });
+
+      navigator.mediaSession.setActionHandler("play", () => togglePlay());
+      navigator.mediaSession.setActionHandler("pause", () => togglePlay());
+      navigator.mediaSession.setActionHandler("previoustrack", null);
+      navigator.mediaSession.setActionHandler("nexttrack", null);
+      navigator.mediaSession.setActionHandler("seekto", (details) => {
+        if (details.seekTime !== undefined) handleSeek(details.seekTime);
+      });
+    }
+  }, [currentTrack]);
+
+  useEffect(() => {
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+    }
+  }, [isPlaying]);
+
   const loadTrackBuffer = async (track: Track) => {
     if (track.buffer) return track.buffer;
     if (!track.filePath) return null;
@@ -167,6 +195,14 @@ export default function Home() {
     } else if (currentTrack) {
       const buffer = await loadTrackBuffer(currentTrack);
       if (buffer) playBuffer(buffer, progress, volume, eqGains, reverbDry, reverbWet);
+    }
+  };
+
+  const handleSeek = async (time: number) => {
+    setOffsetTime(time);
+    if (isPlaying && currentTrack) {
+      const buffer = await loadTrackBuffer(currentTrack);
+      if (buffer) playBuffer(buffer, time, volume, eqGains, reverbDry, reverbWet);
     }
   };
 
@@ -364,7 +400,7 @@ export default function Home() {
         .panel-head { padding: 20px; display: flex; justify-content: space-between; align-items: center; }
         h2 { font-size: 0.75rem; color: #666; letter-spacing: 1px; margin: 0; }
         
-        .list { flex: 1; overflow-y: auto; padding: 0 10px 20px; }
+        .list { flex: 1; overflow-y: auto; padding: 0 10px 100px; }
         .item { padding: 12px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; }
         .item:hover { background: #111; }
         .item.active { background: #222; color: var(--accent); }
@@ -373,7 +409,7 @@ export default function Home() {
         .empty-hint { padding: 20px; font-size: 0.8rem; color: #444; text-align: center; }
         .add-btn { width: 32px; height: 32px; background: #222; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; }
 
-        .eq-scroll { flex: 1; overflow-x: auto; padding: 40px 20px; scrollbar-width: none; }
+        .eq-scroll { flex: 1; overflow-x: auto; padding: 40px 20px 100px; scrollbar-width: none; }
         .eq-grid { display: flex; gap: 8px; min-width: max-content; height: 100%; }
         .eq-col { width: 40px; display: flex; flex-direction: column; align-items: center; gap: 15px; }
         .eq-v { font-size: 0.7rem; color: var(--accent); font-family: monospace; }
@@ -388,18 +424,34 @@ export default function Home() {
         .fx-box input { -webkit-appearance: none; height: 4px; background: #222; border-radius: 2px; cursor: pointer; }
         .dual-row { display: flex; flex-direction: column; gap: 8px; }
 
-        .pre-box { padding: 0 20px 20px; }
+        .pre-box { padding: 0 20px 100px; }
         .pre-scroll { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 10px; }
         .chip { background: #111; border: 1px solid #222; color: #fff; padding: 6px 14px; border-radius: 20px; font-size: 0.75rem; white-space: nowrap; display: flex; align-items: center; gap: 6px; cursor: pointer; }
         .del { opacity: 0.3; }
 
-        .m-panel { padding: 24px; }
+        .m-panel { padding: 24px 24px 100px; }
         .m-field { background: #080808; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 15px; }
         .m-row { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; }
         .m-row span { color: #666; width: 60px; }
         .m-row b { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-        .player { padding: 15px 20px 30px; border-top: 1px solid #222; display: flex; align-items: center; gap: 20px; background: #050505; }
+        .player { 
+          position: fixed;
+          bottom: 20px;
+          left: 20px;
+          right: 20px;
+          z-index: 1000;
+          padding: 16px 24px; 
+          background: rgba(10, 10, 12, 0.7); 
+          backdrop-filter: blur(20px);
+          -webkit-backdrop-filter: blur(20px);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          border-radius: 20px;
+          display: flex; 
+          align-items: center; 
+          gap: 20px; 
+          box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+        }
         .play-btn { width: 50px; height: 50px; border-radius: 50%; background: var(--accent); border: none; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; cursor: pointer; }
         .play-info { flex: 1; display: flex; flex-direction: column; gap: 8px; }
         .p-meta { display: flex; justify-content: space-between; font-size: 0.85rem; }
