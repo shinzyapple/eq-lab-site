@@ -57,29 +57,44 @@ export default function Home() {
   useEffect(() => {
     if (isLoadingSession) return;
     const fetchTracks = async () => {
-      const { data: defaultData, error: defaultError } = await supabase.storage.from("audio").list();
+      console.log("Starting library sync...");
       let initLib: Track[] = [];
       try {
+        // Only add default if it doesn't exist yet to avoid duplicates on re-render
         const buffer = await loadAudio("/audio/base.wav");
         initLib.push({ id: "default", name: "Base Audio", buffer });
-      } catch (e) { }
+        console.log("Default audio loaded");
+      } catch (e) {
+        console.warn("Base audio not found, starting with empty library");
+      }
 
       if (session?.user?.email) {
         setIsLoadingLibrary(true);
         try {
-          const { data, error } = await supabase.from("tracks").select("*").eq("user_email", session.user.email).order("created_at", { ascending: false });
+          console.log("Fetching tracks for:", session.user.email);
+          const { data, error } = await supabase
+            .from("tracks")
+            .select("*")
+            .eq("user_email", session.user.email)
+            .order("created_at", { ascending: false });
+
+          if (error) throw error;
+
           if (data) {
+            console.log(`Found ${data.length} cloud tracks`);
             const cloudTracks: Track[] = data.map(t => ({ id: t.id, name: t.name, filePath: t.file_path }));
             setLibrary([...initLib, ...cloudTracks]);
           } else {
             setLibrary(initLib);
           }
         } catch (e) {
+          console.error("Cloud library fetch failed:", e);
           setLibrary(initLib);
         } finally {
           setIsLoadingLibrary(false);
         }
       } else {
+        console.log("No session, showing local items only");
         setLibrary(initLib);
       }
     };
