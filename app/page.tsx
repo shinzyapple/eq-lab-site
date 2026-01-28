@@ -67,16 +67,21 @@ export default function Home() {
 
   // Load presets from Supabase on mount/session change
   useEffect(() => {
+    if (isLoadingSession) return;
+
     const fetchPresets = async () => {
       if (session?.user?.email) {
+        console.log("Fetching presets for:", session.user.email);
         const { data, error } = await supabase
           .from("presets")
           .select("*")
-          .eq("user_email", session.user.email);
+          .eq("user_email", session.user.email)
+          .order("id", { ascending: true });
 
         if (error) {
           console.error("Error fetching presets:", error);
         } else if (data) {
+          console.log(`${data.length} presets loaded from Supabase`);
           const formatted: Preset[] = data.map((p: any) => ({
             id: p.id,
             name: p.name,
@@ -88,11 +93,12 @@ export default function Home() {
           setPresets([...defaultPresets, ...formatted]);
         }
       } else {
+        console.log("No session email, using default presets only");
         setPresets(defaultPresets);
       }
     };
     fetchPresets();
-  }, [session]);
+  }, [session, isLoadingSession]);
 
   useEffect(() => {
     const updateProgress = () => {
@@ -188,6 +194,7 @@ export default function Home() {
         volume: volume
       };
 
+      console.log("Saving preset:", newPresetData);
       const { data, error } = await supabase
         .from("presets")
         .insert([newPresetData])
@@ -195,8 +202,8 @@ export default function Home() {
 
       if (error) {
         console.error("Error saving preset:", error);
-        alert("保存に失敗しました。");
-      } else if (data) {
+        alert(`保存に失敗しました: ${error.message}`);
+      } else if (data && data.length > 0) {
         const p = data[0];
         const newPreset: Preset = {
           id: p.id,
@@ -207,7 +214,7 @@ export default function Home() {
           volume: p.volume
         };
         setPresets(prev => [...prev, newPreset]);
-        alert("保存しました！");
+        alert("プリセットを保存したよ！");
       }
     }
   };
