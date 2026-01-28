@@ -370,23 +370,33 @@ export default function Home() {
           <section className="glass-panel library-section">
             <h2 className="section-title">ライブラリ</h2>
             <div className="track-list">
-              {library.map((track) => (
-                <div
-                  key={track.id}
-                  onClick={() => {
-                    setCurrentTrack(track);
-                    setProgress(0);
-                    if (isPlaying) playBuffer(track.buffer, 0, volume, eqGains, reverbDry, reverbWet);
-                  }}
-                  className={`library-item ${currentTrack?.id === track.id ? "active" : ""}`}
-                >
-                  <span className="track-name">{track.name}</span>
-                  <span className="track-dur">{formatTime(track.buffer.duration)}</span>
+              {isLoadingLibrary ? (
+                <div className="loading-overlay">
+                  <div className="spinner"></div>
+                  <span>読み込み中...</span>
                 </div>
-              ))}
+              ) : (
+                library.map((track) => (
+                  <div
+                    key={track.id}
+                    onClick={() => {
+                      setCurrentTrack(track);
+                      setProgress(0);
+                      if (isPlaying) playBuffer(track.buffer, 0, volume, eqGains, reverbDry, reverbWet);
+                    }}
+                    className={`library-item ${currentTrack?.id === track.id ? "active" : ""}`}
+                  >
+                    <div className="track-info-main">
+                      <span className="track-name">{track.name}</span>
+                      {track.id !== "default" && <span className="cloud-badge" title="クラウドに保存済み">☁</span>}
+                    </div>
+                    <span className="track-dur">{formatTime(track.buffer.duration)}</span>
+                  </div>
+                ))
+              )}
             </div>
             <label className="upload-label">
-              AUDIOを選択
+              AUDIOを追加
               <input type="file" accept="audio/*" onChange={(e) => handleFileUpload(e, "library")} style={{ display: "none" }} />
             </label>
           </section>
@@ -571,9 +581,11 @@ export default function Home() {
           flex-direction: column;
           padding: 20px;
           gap: 20px;
-          max-width: 1400px;
+          max-width: 100%;
+          overflow-x: hidden;
           margin: 0 auto;
           font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+          box-sizing: border-box;
         }
 
         .main-header {
@@ -613,6 +625,9 @@ export default function Home() {
           display: flex;
           flex-direction: column;
           box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+          max-width: 100%;
+          box-sizing: border-box;
+          overflow: hidden;
         }
 
         .section-title {
@@ -687,9 +702,13 @@ export default function Home() {
         .eq-scroll-container {
           overflow-x: auto;
           padding: 10px 0 30px 0;
-          scrollbar-width: none; /* Hide scrollbar Firefox */
+          scrollbar-width: thin; 
+          -webkit-overflow-scrolling: touch;
+          max-width: 100%;
         }
-        .eq-scroll-container::-webkit-scrollbar { display: none; } /* Hide scrollbar Chrome/Safari */
+        .eq-scroll-container::-webkit-scrollbar { height: 4px; display: block; }
+        .eq-scroll-container::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
+        .eq-scroll-container::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 2px; }
 
         .eq-container { display: flex; gap: 8px; padding: 0 10px; }
         .eq-column { width: 40px; display: flex; flex-direction: column; align-items: center; gap: 15px; }
@@ -749,9 +768,31 @@ export default function Home() {
         }
         .play-button:hover { transform: scale(1.05); }
 
-        .progress-container { flex: 1; }
+        .progress-container { flex: 1; overflow: hidden; }
         .progress-info { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.9rem; }
-        .playing-name { font-weight: 600; color: var(--accent); }
+        .track-info-main { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+        .track-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .cloud-badge { font-size: 0.7rem; opacity: 0.6; color: var(--accent); }
+
+        .loading-overlay {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          padding: 20px;
+          font-size: 0.8rem;
+          color: var(--accent);
+          opacity: 0.8;
+        }
+        .spinner {
+          width: 16px;
+          height: 16px;
+          border: 2px solid rgba(0, 229, 255, 0.2);
+          border-top-color: var(--accent);
+          border-radius: 50%;
+          animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
 
         /* Mobile Responsive */
         @media (max-width: 1200px) {
