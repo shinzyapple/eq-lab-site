@@ -15,7 +15,9 @@ import {
   getDuration,
   getIsPlaying,
   getMatchingEq,
-  setOffsetTime
+  setOffsetTime,
+  suspendContext,
+  resumeContext
 } from "@/lib/audioEngine";
 import { defaultPresets, Preset } from "@/lib/presets";
 import { supabase } from "@/lib/supabaseClient";
@@ -48,13 +50,14 @@ export default function Home() {
 
   const { data: session } = useSession();
 
-  const requestRef = useRef<number>(null);
+  const requestRef = useRef<number | null>(null);
 
   useEffect(() => {
     const init = async () => {
       try {
+        // This will now return a sample buffer if base.wav is missing
         const buffer = await loadAudio("/audio/base.wav");
-        const defaultTrack = { id: "default", name: "Base Audio", buffer };
+        const defaultTrack = { id: "default", name: "Sample Sound (Auto-generated)", buffer };
         setLibrary([defaultTrack]);
         setCurrentTrack(defaultTrack);
       } catch (e) {
@@ -62,6 +65,19 @@ export default function Home() {
       }
     };
     init();
+  }, []);
+
+  // Handle background/foreground to prevent audio glitches (looping sound)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        suspendContext();
+      } else {
+        resumeContext();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, []);
 
   // Load presets from Supabase on mount/session change
@@ -112,21 +128,26 @@ export default function Home() {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, mode: "library" | "source" | "target") => {
     const file = e.target.files?.[0];
     if (file) {
-      const buffer = await loadAudio(file);
-      const newTrack: Track = {
-        id: Math.random().toString(36).substr(2, 9),
-        name: file.name,
-        buffer
-      };
+      try {
+        const buffer = await loadAudio(file);
+        const newTrack: Track = {
+          id: Math.random().toString(36).substr(2, 9),
+          name: file.name,
+          buffer
+        };
 
-      if (mode === "library") {
-        setLibrary(prev => [...prev, newTrack]);
-      } else if (mode === "source") {
-        setSourceTrack(newTrack);
-        setCurrentTrack(newTrack); // Auto-select for playback
-        setProgress(0);
-      } else if (mode === "target") {
-        setTargetTrack(newTrack);
+        if (mode === "library") {
+          setLibrary(prev => [...prev, newTrack]);
+        } else if (mode === "source") {
+          setSourceTrack(newTrack);
+          setCurrentTrack(newTrack); // Auto-select for playback
+          setProgress(0);
+        } else if (mode === "target") {
+          setTargetTrack(newTrack);
+        }
+      } catch (err) {
+        console.error("File upload failed", err);
+        alert("ファイルの読み込みに失敗しました。対応していない形式の可能性があります。");
       }
 
       // Reset input value to allow re-uploading the same file if needed
@@ -277,6 +298,11 @@ export default function Home() {
           <section className="glass-panel library-section">
             <h2 className="section-title">ライブラリ</h2>
             <div className="track-list">
+              {library.length === 0 && (
+                <p style={{ fontSize: "0.7rem", opacity: 0.5, textAlign: "center", padding: "20px" }}>
+                  音声ファイルがありません。下のボタンから追加してください。
+                </p>
+              )}
               {library.map((track) => (
                 <div
                   key={track.id}
@@ -293,7 +319,7 @@ export default function Home() {
               ))}
             </div>
             <label className="upload-label">
-              AUDIOを選択
+              AUDIOを追加
               <input type="file" accept="audio/*" onChange={(e) => handleFileUpload(e, "library")} style={{ display: "none" }} />
             </label>
           </section>
@@ -712,6 +738,3 @@ export default function Home() {
     </main>
   );
 }
-
-
-
