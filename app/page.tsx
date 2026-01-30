@@ -141,12 +141,15 @@ export default function Home() {
 
   // Separate Effect for Cloud Sync: Triggered by session changes
   useEffect(() => {
+    // CRITICAL: If session is still loading, do nothing. 
+    // This prevents wiping out the results restored from localStorage in the first effect.
+    if (status === "loading") return;
+
     let isMounted = true;
     const userEmail = session?.user?.email;
-    const isAuthReady = status !== "loading";
 
     const syncLibrary = async () => {
-      console.log("Starting cloud/default sync...");
+      console.log("Starting cloud/default sync... Auth status:", status);
 
       // 1. Parallel fetch: Default track and Cloud tracks
       const [defaultTrackRes, cloudTracksRes] = await Promise.allSettled([
@@ -161,7 +164,7 @@ export default function Home() {
           }
         })(),
         (async () => {
-          if (!userEmail || !isAuthReady) return [] as Track[];
+          if (!userEmail) return [] as Track[];
           setIsLoadingLibrary(true);
           try {
             const { data, error } = await supabase
@@ -190,11 +193,18 @@ export default function Home() {
       setLibrary(prev => {
         const cloudIds = new Set(cloudTracks.map(t => t.id));
 
-        // Filter previous state: keep valid items
+        // Filter previous state: 
+        // If logged in: only keep local/guest tracks or cloud tracks that are still in cloudIds.
+        // If guest: keep all existing local tracks.
         const locals = prev.filter(t => {
           if (t.id === "default") return false;
-          if (t.filePath) return cloudIds.has(t.id);
-          return true;
+          if (t.filePath) {
+            // If we are logged in, we only keep it if it's still in the cloud
+            if (userEmail) return cloudIds.has(t.id);
+            // If logged out but it has a path, it's a "ghost" from a previous session, usually we keep it
+            return true;
+          }
+          return true; // Guest tracks (no filePath) always stay
         });
 
         const combined = defaultTrack ? [defaultTrack, ...locals, ...cloudTracks] : [...locals, ...cloudTracks];
