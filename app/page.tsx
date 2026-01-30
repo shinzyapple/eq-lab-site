@@ -80,8 +80,10 @@ export default function Home() {
 
         if (data) {
           const buffer = await loadAudio(new File([data], track.name));
-          // Update track in library with buffer to cache it
-          setLibrary(prev => prev.map(t => t.id === track.id ? { ...t, buffer } : t));
+          // Update track in library and current selection with buffer to cache it
+          const updater = (t: Track) => t.id === track.id ? { ...t, buffer } : t;
+          setLibrary(prev => prev.map(updater));
+          setCurrentTrack(curr => curr?.id === track.id ? updater(curr) : curr);
           return buffer;
         }
       } catch (e) {
@@ -91,61 +93,60 @@ export default function Home() {
     return null;
   };
 
-  // Sync Library Metadata - Default Track
-  useEffect(() => {
-    const init = async () => {
-      try {
-        const buffer = await loadAudio("/audio/base.wav");
-        const defaultTrack = { id: "default", name: "サンプル曲 (base.wav)", buffer };
-        setLibrary(prev => {
-          if (prev.find(t => t.id === "default")) return prev;
-          return [defaultTrack, ...prev];
-        });
-        if (!currentTrack) setCurrentTrack(defaultTrack);
-      } catch (e) {
-        console.warn("Base audio load skipped or failed. Using fallback tone.");
-        // Create an explicit fallback if base.wav is missing
-        const ctx = await initContext();
-        if (ctx) {
-          const buffer = createSampleBuffer(ctx);
-          const fallbackTrack = { id: "default", name: "⚠️ 初期警告音 (ファイル未検出)", buffer };
-          setLibrary(prev => [fallbackTrack, ...prev]);
-          if (!currentTrack) setCurrentTrack(fallbackTrack);
-        }
-      }
-    };
-    init();
-  }, []); // Run once
-
-  // Sync Library Metadata - Cloud Tracks
+  // Unified Library Sync: Handles both local default and cloud tracks
   useEffect(() => {
     let isMounted = true;
-    const fetchTracks = async () => {
-      if (session?.user?.email) {
+    const syncLibrary = async () => {
+      // 1. Prepare default track
+      let defaultTrack: Track | null = null;
+      try {
+        const buffer = await loadAudio("/audio/base.wav");
+        defaultTrack = { id: "default", name: "サンプル曲 (base.wav)", buffer };
+      } catch (e) {
+        console.warn("Base audio load failed, using fallback tone");
+        const ctx = await initContext();
+        if (ctx) {
+          defaultTrack = { id: "default", name: "⚠️ 初期警告音 (ファイル未検出)", buffer: createSampleBuffer(ctx) };
+        }
+      }
+
+      if (!isMounted) return;
+
+      // 2. Fetch cloud tracks if authenticated
+      let cloudTracks: Track[] = [];
+      const userEmail = session?.user?.email;
+      if (userEmail) {
         setIsLoadingLibrary(true);
         const { data, error } = await supabase
           .from("tracks")
           .select("*")
-          .eq("user_email", session.user.email)
+          .eq("user_email", userEmail)
           .order("created_at", { ascending: false });
 
-        if (isMounted) {
-          if (data && !error) {
-            const cloudTracks: Track[] = data.map(t => ({ id: t.id, name: t.name, filePath: t.file_path }));
-
-            setLibrary(prev => {
-              // Merge cloud tracks, avoiding duplicates if any
-              const existingIds = new Set(prev.map(t => t.id));
-              const newTracks = cloudTracks.filter(t => !existingIds.has(t.id));
-              return [...prev, ...newTracks];
-            });
-          }
-          setIsLoadingLibrary(false);
+        if (isMounted && data && !error) {
+          cloudTracks = data.map(t => ({ id: t.id, name: t.name, filePath: t.file_path }));
         }
+        if (isMounted) setIsLoadingLibrary(false);
       }
+
+      if (!isMounted) return;
+
+      // 3. Update library state atomically
+      const combined = defaultTrack ? [defaultTrack, ...cloudTracks] : cloudTracks;
+      setLibrary(combined);
+
+      // 4. Initial selection: only if none exists or we just loaded cloud data
+      setCurrentTrack(curr => {
+        if (curr) {
+          // Keep current selection but sync with updated library item (for buffers etc)
+          const matched = combined.find(t => t.id === curr.id);
+          return matched || curr;
+        }
+        return combined[0] || null;
+      });
     };
 
-    fetchTracks();
+    syncLibrary();
     return () => { isMounted = false; };
   }, [session?.user?.email, isLoadingSession]);
 
