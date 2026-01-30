@@ -17,7 +17,9 @@ import {
   getMatchingEq,
   setOffsetTime,
   suspendContext,
-  resumeContext
+  resumeContext,
+  initContext,
+  createSampleBuffer
 } from "@/lib/audioEngine";
 import { defaultPresets, Preset } from "@/lib/presets";
 import { supabase } from "@/lib/supabaseClient";
@@ -86,15 +88,22 @@ export default function Home() {
     const init = async () => {
       try {
         const buffer = await loadAudio("/audio/base.wav");
-        const defaultTrack = { id: "default", name: "Sample Sound (Auto-generated)", buffer };
-        // Set default track initially
+        const defaultTrack = { id: "default", name: "サンプル曲 (base.wav)", buffer };
         setLibrary(prev => {
           if (prev.find(t => t.id === "default")) return prev;
           return [defaultTrack, ...prev];
         });
         if (!currentTrack) setCurrentTrack(defaultTrack);
       } catch (e) {
-        console.warn("Base audio load skipped or failed");
+        console.warn("Base audio load skipped or failed. Using fallback tone.");
+        // Create an explicit fallback if base.wav is missing
+        const ctx = await initContext();
+        if (ctx) {
+          const buffer = createSampleBuffer(ctx);
+          const fallbackTrack = { id: "default", name: "⚠️ 初期警告音 (ファイル未検出)", buffer };
+          setLibrary(prev => [fallbackTrack, ...prev]);
+          if (!currentTrack) setCurrentTrack(fallbackTrack);
+        }
       }
     };
     init();

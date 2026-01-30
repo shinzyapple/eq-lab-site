@@ -70,20 +70,42 @@ export async function loadAudio(urlOrFile: string | File): Promise<AudioBuffer> 
 
   try {
     if (typeof urlOrFile === "string") {
+      console.log(`Loading audio from URL: ${urlOrFile}`);
       const res = await fetch(urlOrFile);
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
       arrayBuffer = await res.arrayBuffer();
     } else {
+      console.log(`Loading audio from File: ${urlOrFile.name} (${urlOrFile.size} bytes)`);
       arrayBuffer = await urlOrFile.arrayBuffer();
     }
-    return await ctx.decodeAudioData(arrayBuffer);
+
+    // Support both promise-based and callback-based decodeAudioData
+    return await new Promise<AudioBuffer>((resolve, reject) => {
+      const successCallback = (decodedBuffer: AudioBuffer) => resolve(decodedBuffer);
+      const errorCallback = (error: Error) => {
+        console.error("decodeAudioData error:", error);
+        reject(error);
+      };
+
+      const result = ctx.decodeAudioData(arrayBuffer, successCallback, errorCallback);
+      if (result && typeof result.then === "function") {
+        result.then(resolve).catch(reject);
+      }
+    });
+
   } catch (e) {
-    console.warn("Failed to load audio, creating sample buffer:", e);
+    console.warn("Failed to load audio source:", e);
+    // Only return sample buffer for URLs (like base.wav) as a safe fallback.
+    // For Files, throw so the UI can catch it and alert the user.
+    if (typeof urlOrFile !== "string") {
+      throw e;
+    }
     return createSampleBuffer(ctx);
   }
 }
 
 export function createSampleBuffer(context: AudioContext): AudioBuffer {
+  console.log("Creating fallback sample buffer (Sine 440Hz)");
   const duration = 2.0;
   const sampleRate = context.sampleRate;
   const buffer = context.createBuffer(1, sampleRate * duration, sampleRate);
