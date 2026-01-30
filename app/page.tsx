@@ -22,7 +22,8 @@ import {
   createSampleBuffer,
   setAudioEngineCallbacks,
   updateMediaMetadata,
-  updateMediaPositionState
+  updateMediaPositionState,
+  playStream
 } from "@/lib/audioEngine";
 import { defaultPresets, Preset } from "@/lib/presets";
 import { supabase } from "@/lib/supabaseClient";
@@ -75,37 +76,40 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Helper to load buffer if missing
-  const loadTrackBuffer = async (track: Track): Promise<AudioBuffer | null> => {
-    if (track.buffer) return track.buffer;
+  // Pre-load logic: returns either a buffer or a signed URL for streaming
+  const prepareTrackSource = async (track: Track, forceBuffer = false): Promise<{ buffer?: AudioBuffer, url?: string } | null> => {
+    if (track.buffer) return { buffer: track.buffer };
+
     if (track.filePath) {
       try {
-        console.log(`Downloading track: ${track.filePath}`);
-        const { data, error } = await supabase.storage.from("eq-lab-tracks").download(track.filePath);
+        // If we ONLY want the buffer (e.g. for Matching analysis), download + decode
+        if (forceBuffer) {
+          console.log(`Downloading track for analysis: ${track.filePath}`);
+          const { data, error } = await supabase.storage.from("eq-lab-tracks").download(track.filePath);
+          if (error) throw error;
+          const buffer = await loadAudio(data);
+          // Don't update currentTrack here to avoid side effects during background analysis
+          return { buffer };
+        }
+
+        // Standard Playback: Get signed URL for streaming
+        console.log(`Getting signed URL for streaming: ${track.filePath}`);
+        const { data, error } = await supabase.storage
+          .from("eq-lab-tracks")
+          .createSignedUrl(track.filePath, 3600); // 1 hour
 
         if (error) {
-          console.error("Download Error Details:", error);
-          const errorMsg = error.message || JSON.stringify(error, Object.getOwnPropertyNames(error));
-          alert(`楽曲のダウンロードに失敗しました: ${errorMsg}`);
-          return null;
+          console.error("Signed URL Error, falling back to download:", error);
+          const { data: fileData, error: dlError } = await supabase.storage.from("eq-lab-tracks").download(track.filePath);
+          if (dlError) throw dlError;
+          const buffer = await loadAudio(fileData);
+          return { buffer };
         }
 
-        if (data) {
-          // MEMORY OPTIMIZATION: Decode using the smallest possible footprint.
-          // Don't store buffers for every track in the library array.
-          console.log(`Download complete, decoding... Space check: ${data.size} bytes`);
-
-          setIsBuffering(true); // Ensure decoding status is shown
-          const buffer = await loadAudio(data); // Pass blob directly
-
-          // Only update the currently active track's buffer. 
-          // Do NOT update the 'library' state here to prevent memory bloat.
-          setCurrentTrack(curr => curr?.id === track.id ? { ...curr, buffer } : curr);
-
-          return buffer;
-        }
+        if (data?.signedUrl) return { url: data.signedUrl };
       } catch (e: any) {
-        console.error("Failed to load cloud track:", e);
-        alert(`楽曲の解析（デコード）に失敗しました。ファイルが大きすぎる可能性があります: ${e.message || '不明なエラー'}`);
+        console.error("Failed to prepare track source:", e);
+        alert(`楽曲の準備に失敗しました: ${e.message || '不明なエラー'}`);
       }
     }
     return null;
@@ -461,7 +465,6 @@ export default function Home() {
   };
 
   const togglePlay = async () => {
-    // 1. Context Init
     await initContext();
 
     if (isPlaying) {
@@ -477,11 +480,16 @@ export default function Home() {
       setIsBuffering(true);
 
       try {
-        const buffer = await loadTrackBuffer(currentTrack);
-        if (buffer) {
-          // Re-resume context for iOS
-          await initContext();
-          playBuffer(buffer, progress, volume, eqGains, reverbDry, reverbWet);
+        const source = await prepareTrackSource(currentTrack);
+        if (source) {
+          await initContext(); // Re-prime for iOS
+          if (source.url) {
+            console.log("Starting STREAMING playback...");
+            playStream(source.url, progress, volume, eqGains, reverbDry, reverbWet);
+          } else if (source.buffer) {
+            console.log("Starting BUFFER playback...");
+            playBuffer(source.buffer, progress, volume, eqGains, reverbDry, reverbWet);
+          }
           setIsPlaying(true);
         }
       } catch (e: any) {
@@ -497,10 +505,15 @@ export default function Home() {
     setProgress(time);
     setOffsetTime(time);
     if (isPlaying && currentTrack) {
-      const buffer = await loadTrackBuffer(currentTrack);
-      if (buffer) playBuffer(buffer, time, volume, eqGains, reverbDry, reverbWet);
+      const source = await prepareTrackSource(currentTrack);
+      if (source) {
+        if (source.url) {
+          playStream(source.url, time, volume, eqGains, reverbDry, reverbWet);
+        } else if (source.buffer) {
+          playBuffer(source.buffer, time, volume, eqGains, reverbDry, reverbWet);
+        }
+      }
     }
-    // Immediate sync to lock screen after manual seek
     updateMediaPositionState();
   };
 
@@ -607,10 +620,12 @@ export default function Home() {
     if (!sTrack || !targetTrack) return;
     setIsMatching(true);
     try {
-      const sBuf = await loadTrackBuffer(sTrack);
-      const tBuf = await loadTrackBuffer(targetTrack);
+      const sSource = await prepareTrackSource(sTrack, true);
+      const tSource = await prepareTrackSource(targetTrack, true);
 
-      if (sBuf && tBuf) {
+      if (sSource?.buffer && tSource?.buffer) {
+        const sBuf = sSource.buffer;
+        const tBuf = tSource.buffer;
         const matchedGains = await getMatchingEq(sBuf, tBuf);
         setEqGains(matchedGains);
         matchedGains.forEach((g, i) => setEqGain(i, g));
@@ -708,8 +723,11 @@ export default function Home() {
                     setCurrentTrack(track);
                     setProgress(0);
                     if (isPlaying) {
-                      const buf = await loadTrackBuffer(track);
-                      if (buf) playBuffer(buf, 0, volume, eqGains, reverbDry, reverbWet);
+                      const source = await prepareTrackSource(track);
+                      if (source) {
+                        if (source.url) playStream(source.url, 0, volume, eqGains, reverbDry, reverbWet);
+                        else if (source.buffer) playBuffer(source.buffer, 0, volume, eqGains, reverbDry, reverbWet);
+                      }
                     }
                   }}
                   className={`library-item ${currentTrack?.id === track.id ? "active" : ""}`}

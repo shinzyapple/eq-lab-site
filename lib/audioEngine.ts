@@ -12,6 +12,8 @@ let reverbDryGain: GainNode | null = null;
 let mainGainNode: GainNode | null = null;
 let streamDest: MediaStreamAudioDestinationNode | null = null;
 let proxyAudio: HTMLAudioElement | null = null;
+let mediaElement: HTMLAudioElement | null = null;
+let mediaSourceNode: MediaElementAudioSourceNode | null = null;
 let onPlaybackChange: ((playing: boolean) => void) | null = null;
 let onSeekTo: ((time: number) => void) | null = null;
 
@@ -57,11 +59,16 @@ export async function initContext() {
     proxyAudio = new Audio();
     proxyAudio.srcObject = streamDest.stream;
     proxyAudio.setAttribute("playsinline", "true");
-    // iOS Control Center requirement: Must be unmuted to show up in lock screen/controls
-    proxyAudio.muted = false;
+    proxyAudio.muted = false; // iOS requirement for lock screen
+
+    // Create the hidden media element for streaming
+    mediaElement = new Audio();
+    mediaElement.crossOrigin = "anonymous";
+    mediaElement.setAttribute("playsinline", "true");
+    mediaSourceNode = audioContext.createMediaElementSource(mediaElement);
 
     // Prime the proxy audio immediately with a play attempt
-    proxyAudio.play().catch(e => console.log("Initial proxy audio priming (expected to fail if no user act):", e));
+    proxyAudio.play().catch(e => console.log("Initial proxy priming:", e));
 
     // Resume context on first user interaction if it starts suspended
     if (audioContext.state === "suspended") {
@@ -208,18 +215,14 @@ export function playBuffer(
   reverbWetGain.connect(mainGainNode);
 
   // PIPE OUTPUT
-  // IMPORTANT for iOS Control Center: 
-  // We pipe everything through streamDest -> proxyAudio (unmuted). 
-  // We do NOT connect to audioContext.destination directly to avoid double audio.
   if (streamDest) {
     mainGainNode.connect(streamDest);
   } else {
-    // Fallback for environments without stream destination
     mainGainNode.connect(audioContext.destination);
   }
 
   if (proxyAudio) {
-    proxyAudio.play().catch(e => console.log("Proxy audio play failed:", e));
+    proxyAudio.play().catch(e => console.log("Proxy play error:", e));
   }
 
   source.start(0, startAt);
@@ -227,7 +230,6 @@ export function playBuffer(
 
   if ('mediaSession' in navigator) {
     navigator.mediaSession.playbackState = 'playing';
-    // Refresh metadata and position whenever playback starts
     if (currentBuffer) {
       updateMediaMetadata(lastTitle || 'Unknown Track');
       updateMediaPositionState();
@@ -235,14 +237,88 @@ export function playBuffer(
   }
 
   source.onended = () => {
-    if (!source) return; // Already stopped manually
-    const playedTime = audioContext!.currentTime - startTime;
-    if (playedTime >= (buffer.duration - startAt - 0.1)) {
-      isPlayingInternal = false;
-      offsetTime = 0;
-      if ('mediaSession' in navigator) {
-        navigator.mediaSession.playbackState = 'none';
-      }
+    if (!source) return;
+    isPlayingInternal = false;
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = 'none';
+    }
+  };
+}
+
+export function playStream(
+  url: string,
+  startAt = 0,
+  volume = 0.5,
+  eqGains: number[],
+  reverbDry = 1.0,
+  reverbWet = 0.2
+) {
+  if (!audioContext || !mediaElement || !mediaSourceNode) {
+    console.error("playStream failed: Engine not ready");
+    return;
+  }
+
+  stop();
+  currentBuffer = null;
+  offsetTime = startAt;
+
+  // Setup Graph Connection
+  filters = [];
+  let current: AudioNode = mediaSourceNode;
+  EQ_FREQUENCIES.forEach((freq, i) => {
+    const filter = audioContext!.createBiquadFilter();
+    filter.type = "peaking";
+    filter.frequency.value = freq;
+    filter.Q.value = 1.4;
+    filter.gain.value = eqGains[i] || 0;
+    current.connect(filter);
+    filters.push(filter);
+    current = filter;
+  });
+
+  reverbDryGain = audioContext.createGain();
+  reverbDryGain.gain.value = reverbDry;
+  reverbNode = audioContext.createConvolver();
+  try {
+    reverbNode.buffer = createImpulseResponse(audioContext, 2, 2);
+  } catch (e) { }
+  reverbWetGain = audioContext.createGain();
+  reverbWetGain.gain.value = reverbWet;
+  mainGainNode = audioContext.createGain();
+  mainGainNode.gain.value = volume;
+
+  current.connect(reverbDryGain);
+  current.connect(reverbNode);
+  reverbNode.connect(reverbWetGain);
+  reverbDryGain.connect(mainGainNode);
+  reverbWetGain.connect(mainGainNode);
+
+  if (streamDest) {
+    mainGainNode.connect(streamDest);
+  } else {
+    mainGainNode.connect(audioContext.destination);
+  }
+
+  mediaElement.src = url;
+  mediaElement.currentTime = startAt;
+  mediaElement.play().catch(e => console.error("Stream play failed:", e));
+
+  if (proxyAudio) {
+    proxyAudio.play().catch(e => { });
+  }
+
+  isPlayingInternal = true;
+
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.playbackState = 'playing';
+    updateMediaMetadata(lastTitle || 'Streaming Track');
+    updateMediaPositionState();
+  }
+
+  mediaElement.onended = () => {
+    isPlayingInternal = false;
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = 'none';
     }
   };
 }
@@ -278,12 +354,16 @@ export function updateMediaMetadata(title: string, artist: string = 'EQ LAB', al
 }
 
 export function updateMediaPositionState() {
-  if ('mediaSession' in navigator && 'setPositionState' in navigator.mediaSession && currentBuffer) {
-    navigator.mediaSession.setPositionState({
-      duration: currentBuffer.duration,
-      playbackRate: 1,
-      position: getCurrentTime()
-    });
+  if ('mediaSession' in navigator && 'setPositionState' in navigator.mediaSession) {
+    const dur = getDuration();
+    const pos = getCurrentTime();
+    if (dur > 0 && !isNaN(dur) && !isNaN(pos)) {
+      navigator.mediaSession.setPositionState({
+        duration: dur,
+        playbackRate: 1,
+        position: pos
+      });
+    }
   }
 }
 
@@ -409,9 +489,11 @@ export function getIsPlaying() {
 }
 
 export function getCurrentTime() {
-  if (!isPlayingInternal || !audioContext) return offsetTime;
-  const curr = offsetTime + (audioContext.currentTime - startTime);
-  return Math.min(curr, currentBuffer?.duration || 0);
+  if (!audioContext) return offsetTime;
+  if (mediaElement && mediaElement.src) {
+    return mediaElement.currentTime;
+  }
+  return isPlayingInternal ? (audioContext.currentTime - startTime + offsetTime) : offsetTime;
 }
 
 export function setOffsetTime(time: number) {
