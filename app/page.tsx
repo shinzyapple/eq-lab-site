@@ -110,17 +110,15 @@ export default function Home() {
     return null;
   };
 
-  // Unified Library Sync: Handles both local default and cloud tracks
+  // Load all local storage settings once on mount
   useEffect(() => {
-    let isMounted = true;
-
-    // Load local storage on mount
     const savedLib = localStorage.getItem("eq-lab-library");
     if (savedLib) {
       try {
         const parsed = JSON.parse(savedLib);
         const metadataOnly = parsed.map((t: any) => ({ ...t, buffer: undefined }));
         setLibrary(metadataOnly);
+        console.log("Restored library from localStorage", metadataOnly.length);
       } catch (e) { console.error("Failed to parse saved library"); }
     }
 
@@ -136,81 +134,77 @@ export default function Home() {
         if (s.reverbWet !== undefined) { setRevWet(s.reverbWet); setReverbWet(s.reverbWet); }
         if (s.volume !== undefined) { setGlobalVolume(s.volume); setVolume(s.volume); }
         if (s.activePresetId) setActivePresetId(s.activePresetId);
-        if (s.currentTrackId) {
-          // We'll sync this after library is loaded in syncLibrary
-          (window as any).__lastTrackId = s.currentTrackId;
-        }
+        if (s.currentTrackId) (window as any).__lastTrackId = s.currentTrackId;
       } catch (e) { console.error("Failed to parse saved settings"); }
     }
+  }, []);
+
+  // Separate Effect for Cloud Sync: Triggered by session changes
+  useEffect(() => {
+    let isMounted = true;
+    const userEmail = session?.user?.email;
+    const isAuthReady = status !== "loading";
 
     const syncLibrary = async () => {
-      console.log("Starting library sync...");
+      console.log("Starting cloud/default sync...");
 
-      // 1. Prepare default track
-      let defaultTrack: Track | null = null;
-      try {
-        const buffer = await loadAudio("/audio/base.wav");
-        defaultTrack = { id: "default", name: "サンプル曲 (base.wav)", buffer };
-      } catch (e) {
-        console.warn("Base audio load failed, creating fallback tone");
-        const ctx = await initContext();
-        if (ctx) {
-          defaultTrack = { id: "default", name: "⚠️ 初期警告音 (ファイル未検出)", buffer: createSampleBuffer(ctx) };
-        }
-      }
-
-      if (!isMounted) return;
-
-      // 2. Fetch cloud tracks if authenticated
-      let cloudTracks: Track[] = [];
-      const userEmail = session?.user?.email;
-      const isAuthReady = status !== "loading";
-
-      if (userEmail && isAuthReady) {
-        setIsLoadingLibrary(true);
-        try {
-          const { data, error } = await supabase
-            .from("tracks")
-            .select("*")
-            .eq("user_email", userEmail)
-            .order("created_at", { ascending: false });
-
-          if (isMounted && data && !error) {
-            cloudTracks = data.map(t => ({ id: t.id, name: t.name, filePath: t.file_path }));
+      // 1. Parallel fetch: Default track and Cloud tracks
+      const [defaultTrackRes, cloudTracksRes] = await Promise.allSettled([
+        (async () => {
+          try {
+            const buffer = await loadAudio("/audio/base.wav");
+            return { id: "default", name: "サンプル曲 (base.wav)", buffer } as Track;
+          } catch (e) {
+            console.warn("Base audio load failed, creating fallback");
+            const ctx = await initContext();
+            return ctx ? { id: "default", name: "⚠️ 初期警告音 (ファイル未検出)", buffer: createSampleBuffer(ctx) } : null;
           }
-        } catch (err) {
-          console.error("Supabase fetch error:", err);
-        } finally {
-          if (isMounted) setIsLoadingLibrary(false);
-        }
-      }
+        })(),
+        (async () => {
+          if (!userEmail || !isAuthReady) return [] as Track[];
+          setIsLoadingLibrary(true);
+          try {
+            const { data, error } = await supabase
+              .from("tracks")
+              .select("*")
+              .eq("user_email", userEmail)
+              .order("created_at", { ascending: false });
+            if (data && !error) {
+              return data.map(t => ({ id: t.id, name: t.name, filePath: t.file_path })) as Track[];
+            }
+          } catch (err) {
+            console.error("Supabase fetch error:", err);
+          } finally {
+            if (isMounted) setIsLoadingLibrary(false);
+          }
+          return [] as Track[];
+        })()
+      ]);
 
       if (!isMounted) return;
 
-      // 3. Atomically update the library
+      const defaultTrack = defaultTrackRes.status === 'fulfilled' ? defaultTrackRes.value : null;
+      const cloudTracks = cloudTracksRes.status === 'fulfilled' ? cloudTracksRes.value : [];
+
+      // 3. Update the library state
       setLibrary(prev => {
         const cloudIds = new Set(cloudTracks.map(t => t.id));
 
-        // IMPORTANT: Filter out tracks that have a filePath (cloud tracks) but are NOT in current cloud results.
-        // This prevents deleted cloud tracks from lingering in localStorage and reappearing.
+        // Filter previous state: keep valid items
         const locals = prev.filter(t => {
           if (t.id === "default") return false;
-          // If it has a filePath, it MUST be in cloudTracks to stay
           if (t.filePath) return cloudIds.has(t.id);
-          // Pure local (guest) tracks stay
           return true;
         });
 
         const combined = defaultTrack ? [defaultTrack, ...locals, ...cloudTracks] : [...locals, ...cloudTracks];
-
-        // Unique by ID
         const unique = Array.from(new Map(combined.map(t => [t.id, t])).values());
 
-        // Persist metadata to localStorage (filter out buffers)
+        // Update local storage with the combined metadata
         const toSave = unique.map(t => ({ id: t.id, name: t.name, filePath: t.filePath }));
         localStorage.setItem("eq-lab-library", JSON.stringify(toSave));
 
-        // Restore last selected track if it exists in the new library
+        // Restore last selected track
         const lastId = (window as any).__lastTrackId;
         if (lastId) {
           const matched = unique.find(t => t.id === lastId);
@@ -218,14 +212,14 @@ export default function Home() {
           delete (window as any).__lastTrackId;
         }
 
-        console.log(`Library synced: ${unique.length} tracks`);
+        console.log(`Library sync complete: ${unique.length} tracks`);
         return unique;
       });
     };
 
     syncLibrary();
     return () => { isMounted = false; };
-  }, [session?.user?.email, status]); // Status change is a more reliable trigger than isLoadingSession
+  }, [session?.user?.email, status]);
 
   // Handle currentTrack initialization and synchronization
   useEffect(() => {
