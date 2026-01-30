@@ -104,14 +104,32 @@ export default function Home() {
     let isMounted = true;
 
     // Load local storage on mount
-    const saved = localStorage.getItem("eq-lab-library");
-    if (saved) {
+    const savedLib = localStorage.getItem("eq-lab-library");
+    if (savedLib) {
       try {
-        const parsed = JSON.parse(saved);
-        // We only keep metadata, not buffers
+        const parsed = JSON.parse(savedLib);
         const metadataOnly = parsed.map((t: any) => ({ ...t, buffer: undefined }));
         setLibrary(metadataOnly);
       } catch (e) { console.error("Failed to parse saved library"); }
+    }
+
+    const savedSettings = localStorage.getItem("eq-lab-settings");
+    if (savedSettings) {
+      try {
+        const s = JSON.parse(savedSettings);
+        if (s.eqGains) {
+          setEqGains(s.eqGains);
+          s.eqGains.forEach((g: number, i: number) => setEqGain(i, g));
+        }
+        if (s.reverbDry !== undefined) { setRevDry(s.reverbDry); setReverbDry(s.reverbDry); }
+        if (s.reverbWet !== undefined) { setRevWet(s.reverbWet); setReverbWet(s.reverbWet); }
+        if (s.volume !== undefined) { setGlobalVolume(s.volume); setVolume(s.volume); }
+        if (s.activePresetId) setActivePresetId(s.activePresetId);
+        if (s.currentTrackId) {
+          // We'll sync this after library is loaded in syncLibrary
+          (window as any).__lastTrackId = s.currentTrackId;
+        }
+      } catch (e) { console.error("Failed to parse saved settings"); }
     }
 
     const syncLibrary = async () => {
@@ -168,6 +186,14 @@ export default function Home() {
         // Persist metadata to localStorage (filter out buffers)
         const toSave = combined.map(t => ({ id: t.id, name: t.name, filePath: t.filePath }));
         localStorage.setItem("eq-lab-library", JSON.stringify(toSave));
+
+        // Restore last selected track if it exists in the new library
+        const lastId = (window as any).__lastTrackId;
+        if (lastId) {
+          const matched = combined.find(t => t.id === lastId);
+          if (matched) setCurrentTrack(matched);
+          delete (window as any).__lastTrackId;
+        }
 
         console.log(`Library synced: ${combined.length} tracks`);
         return combined;
@@ -252,6 +278,19 @@ export default function Home() {
     };
     fetchPresets();
   }, [session?.user?.email, isLoadingSession]);
+
+  // Persistence Effect for Settings
+  useEffect(() => {
+    const settings = {
+      eqGains,
+      reverbDry,
+      reverbWet,
+      volume,
+      activePresetId,
+      currentTrackId: currentTrack?.id
+    };
+    localStorage.setItem("eq-lab-settings", JSON.stringify(settings));
+  }, [eqGains, reverbDry, reverbWet, volume, activePresetId, currentTrack?.id]);
 
   // Progress Loop
   const updateProgress = () => {
