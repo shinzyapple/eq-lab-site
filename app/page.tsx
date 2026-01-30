@@ -98,13 +98,15 @@ export default function Home() {
     let isMounted = true;
 
     const syncLibrary = async () => {
-      // 1. Prepare default track (base.wav or fallback warning tone)
+      console.log("Starting library sync...");
+
+      // 1. Prepare default track
       let defaultTrack: Track | null = null;
       try {
         const buffer = await loadAudio("/audio/base.wav");
         defaultTrack = { id: "default", name: "サンプル曲 (base.wav)", buffer };
       } catch (e) {
-        console.warn("Base audio load failed, using fallback tone");
+        console.warn("Base audio load failed, creating fallback tone");
         const ctx = await initContext();
         if (ctx) {
           defaultTrack = { id: "default", name: "⚠️ 初期警告音 (ファイル未検出)", buffer: createSampleBuffer(ctx) };
@@ -116,7 +118,9 @@ export default function Home() {
       // 2. Fetch cloud tracks if authenticated
       let cloudTracks: Track[] = [];
       const userEmail = session?.user?.email;
-      if (userEmail && !isLoadingSession) {
+      const isAuthReady = status !== "loading";
+
+      if (userEmail && isAuthReady) {
         setIsLoadingLibrary(true);
         try {
           const { data, error } = await supabase
@@ -138,19 +142,19 @@ export default function Home() {
       if (!isMounted) return;
 
       // 3. Atomically update the library
-      // We use a functional update to make sure we don't overwrite newly uploaded tracks
       setLibrary(prev => {
         const cloudIds = new Set(cloudTracks.map(t => t.id));
-        // Keep anything that is NOT in the cloud results and is NOT the default track
-        // (This preserves tracks uploaded in this session that haven't been "synced" yet)
-        const currentLocals = prev.filter(t => !cloudIds.has(t.id) && t.id !== "default");
-        return defaultTrack ? [defaultTrack, ...currentLocals, ...cloudTracks] : [...currentLocals, ...cloudTracks];
+        // Keep uploaded tracks that aren't in the cloud results yet
+        const locals = prev.filter(t => !cloudIds.has(t.id) && t.id !== "default");
+        const combined = defaultTrack ? [defaultTrack, ...locals, ...cloudTracks] : [...locals, ...cloudTracks];
+        console.log(`Library updated: ${combined.length} tracks`);
+        return combined;
       });
     };
 
     syncLibrary();
     return () => { isMounted = false; };
-  }, [session?.user?.email, isLoadingSession]);
+  }, [session?.user?.email, status]); // Status change is a more reliable trigger than isLoadingSession
 
   // Handle currentTrack initialization and synchronization
   useEffect(() => {

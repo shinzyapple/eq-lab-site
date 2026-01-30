@@ -45,7 +45,7 @@ export async function initContext() {
     proxyAudio.setAttribute("playsinline", "true");
   }
   if (audioContext.state === "suspended") {
-    await audioContext.resume();
+    audioContext.resume();
   }
   return audioContext;
 }
