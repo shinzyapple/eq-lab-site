@@ -10,6 +10,8 @@ let reverbNode: ConvolverNode | null = null;
 let reverbWetGain: GainNode | null = null;
 let reverbDryGain: GainNode | null = null;
 let mainGainNode: GainNode | null = null;
+let streamDest: MediaStreamAudioDestinationNode | null = null;
+let proxyAudio: HTMLAudioElement | null = null;
 
 let currentBuffer: AudioBuffer | null = null;
 let startTime = 0;
@@ -34,6 +36,13 @@ export async function initContext() {
   if (typeof window === "undefined") return null;
   if (!audioContext) {
     audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+
+    // Create a proxy audio element to keep playback alive in background
+    streamDest = audioContext.createMediaStreamDestination();
+    proxyAudio = new Audio();
+    proxyAudio.srcObject = streamDest.stream;
+    // Essential for background audio
+    proxyAudio.setAttribute("playsinline", "true");
   }
   if (audioContext.state === "suspended") {
     await audioContext.resume();
@@ -138,7 +147,15 @@ export function playBuffer(
   reverbDryGain.connect(mainGainNode);
   reverbWetGain.connect(mainGainNode);
 
+  // Pipe to BOTH context destination and proxy audio
   mainGainNode.connect(audioContext.destination);
+  if (streamDest) {
+    mainGainNode.connect(streamDest);
+  }
+
+  if (proxyAudio) {
+    proxyAudio.play().catch(e => console.log("Proxy audio play failed:", e));
+  }
 
   source.start(0, startAt);
   isPlayingInternal = true;
@@ -206,6 +223,9 @@ export function setVolume(value: number) {
 }
 
 export function stop() {
+  if (proxyAudio) {
+    proxyAudio.pause();
+  }
   if (source) {
     try {
       source.stop();
