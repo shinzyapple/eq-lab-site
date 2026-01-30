@@ -471,7 +471,7 @@ export default function Home() {
             <div className="section-head-row">
               <h2 className="section-title">ライブラリ</h2>
               <label className="add-icon-btn" title="AUDIOを追加">
-                <input type="file" accept="audio/*" onChange={(e) => handleFileUpload(e, "library")} style={{ display: "none" }} />
+                <input type="file" accept="audio/*, .mp3, .wav, .m4a, .aac, .ogg" onChange={(e) => handleFileUpload(e, "library")} style={{ display: "none" }} />
                 +
               </label>
             </div>
@@ -553,8 +553,8 @@ export default function Home() {
         <section className={`panel m-panel ${activeTab === "matching" ? "show-mobile" : "hide-mobile"}`}>
           <h2>AI MATCHING</h2>
           <div className="m-field">
-            <div className="m-row"><span>Src:</span> <b>{sourceTrack?.name || currentTrack?.name || "-"}</b> <label className="btn-s">File<input type="file" hidden onChange={e => handleFileUpload(e, "source")} /></label></div>
-            <div className="m-row"><span>Tgt:</span> <b>{targetTrack?.name || "-"}</b> <label className="btn-s">File<input type="file" hidden onChange={e => handleFileUpload(e, "target")} /></label></div>
+            <div className="m-row"><span>Src:</span> <b>{sourceTrack?.name || currentTrack?.name || "-"}</b> <label className="btn-s">File<input type="file" accept="audio/*, .mp3, .wav, .m4a, .aac, .ogg" hidden onChange={e => handleFileUpload(e, "source")} /></label></div>
+            <div className="m-row"><span>Tgt:</span> <b>{targetTrack?.name || "-"}</b> <label className="btn-s">File<input type="file" accept="audio/*, .mp3, .wav, .m4a, .aac, .ogg" hidden onChange={e => handleFileUpload(e, "target")} /></label></div>
           </div>
           <button onClick={handleMatch} disabled={isMatching || !targetTrack} className="btn-primary">{isMatching ? "Processing..." : "Run Match Process"}</button>
         </section>
