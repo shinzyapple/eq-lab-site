@@ -179,10 +179,14 @@ export function playBuffer(
   reverbDryGain.connect(mainGainNode);
   reverbWetGain.connect(mainGainNode);
 
-  // Pipe to BOTH context destination and proxy audio
-  mainGainNode.connect(audioContext.destination);
+  // PIPE OUTPUT
+  // To avoid double audio, we ONLY connect to the streamDest which is played by proxyAudio.
+  // This is essential for iPhone background playback to work with Web Audio API.
   if (streamDest) {
     mainGainNode.connect(streamDest);
+  } else {
+    // Fallback for environments where MediaStreamDestination isn't supported (rare)
+    mainGainNode.connect(audioContext.destination);
   }
 
   if (proxyAudio) {
@@ -194,6 +198,7 @@ export function playBuffer(
 
   if ('mediaSession' in navigator) {
     navigator.mediaSession.playbackState = 'playing';
+    updateMediaPositionState();
   }
 
   source.onended = () => {
@@ -230,6 +235,18 @@ export function updateMediaMetadata(title: string, artist: string = 'EQ LAB', al
       if (details.seekTime !== undefined && onSeekTo) {
         onSeekTo(details.seekTime);
       }
+    });
+
+    updateMediaPositionState();
+  }
+}
+
+export function updateMediaPositionState() {
+  if ('mediaSession' in navigator && 'setPositionState' in navigator.mediaSession && currentBuffer) {
+    navigator.mediaSession.setPositionState({
+      duration: currentBuffer.duration,
+      playbackRate: 1,
+      position: getCurrentTime()
     });
   }
 }

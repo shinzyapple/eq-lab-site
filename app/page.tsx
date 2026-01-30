@@ -21,7 +21,8 @@ import {
   initContext,
   createSampleBuffer,
   setAudioEngineCallbacks,
-  updateMediaMetadata
+  updateMediaMetadata,
+  updateMediaPositionState
 } from "@/lib/audioEngine";
 import { defaultPresets, Preset } from "@/lib/presets";
 import { supabase } from "@/lib/supabaseClient";
@@ -241,6 +242,8 @@ export default function Home() {
     if (playing && !isDragging) {
       setProgress(getCurrentTime());
       setDuration(getDuration());
+      // Sync control center progress
+      updateMediaPositionState();
     }
     requestRef.current = requestAnimationFrame(updateProgress);
   };
