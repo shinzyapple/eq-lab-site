@@ -23,7 +23,8 @@ import {
   setAudioEngineCallbacks,
   updateMediaMetadata,
   updateMediaPositionState,
-  playStream
+  playStream,
+  seekTo
 } from "@/lib/audioEngine";
 import { defaultPresets, Preset } from "@/lib/presets";
 import { supabase } from "@/lib/supabaseClient";
@@ -503,18 +504,7 @@ export default function Home() {
 
   const handleManualSeek = async (time: number) => {
     setProgress(time);
-    setOffsetTime(time);
-    if (isPlaying && currentTrack) {
-      const source = await prepareTrackSource(currentTrack);
-      if (source) {
-        if (source.url) {
-          playStream(source.url, time, volume, eqGains, reverbDry, reverbWet);
-        } else if (source.buffer) {
-          playBuffer(source.buffer, time, volume, eqGains, reverbDry, reverbWet);
-        }
-      }
-    }
-    updateMediaPositionState();
+    seekTo(time, volume, eqGains, reverbDry, reverbWet);
   };
 
   const deleteTrack = async (id: string, e: React.MouseEvent) => {

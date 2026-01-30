@@ -232,10 +232,8 @@ export function playBuffer(
 
   if ('mediaSession' in navigator) {
     navigator.mediaSession.playbackState = 'playing';
-    if (currentBuffer) {
-      updateMediaMetadata(lastTitle || 'Unknown Track');
-      updateMediaPositionState();
-    }
+    updateMediaMetadata(lastTitle || 'Unknown Track');
+    updateMediaPositionState();
   }
 
   source.onended = () => {
@@ -340,19 +338,23 @@ export function updateMediaMetadata(title: string, artist: string = 'EQ LAB', al
       ]
     });
 
+    updateMediaPositionState();
+
+    // REGISTER HANDLERS EVERY TIME METADATA UPDATES
     navigator.mediaSession.setActionHandler('play', () => {
+      console.log("MediaSession: play");
       if (onPlaybackChange) onPlaybackChange(true);
     });
     navigator.mediaSession.setActionHandler('pause', () => {
+      console.log("MediaSession: pause");
       if (onPlaybackChange) onPlaybackChange(false);
     });
     navigator.mediaSession.setActionHandler('seekto', (details) => {
+      console.log("MediaSession: seekto", details.seekTime);
       if (details.seekTime !== undefined && onSeekTo) {
         onSeekTo(details.seekTime);
       }
     });
-
-    updateMediaPositionState();
   }
 }
 
@@ -360,12 +362,16 @@ export function updateMediaPositionState() {
   if ('mediaSession' in navigator && 'setPositionState' in navigator.mediaSession) {
     const dur = getDuration();
     const pos = getCurrentTime();
-    if (dur > 0 && !isNaN(dur) && !isNaN(pos)) {
-      navigator.mediaSession.setPositionState({
-        duration: dur,
-        playbackRate: 1,
-        position: pos
-      });
+    if (dur > 0 && !isNaN(dur) && !isNaN(pos) && isFinite(dur) && isFinite(pos)) {
+      try {
+        navigator.mediaSession.setPositionState({
+          duration: dur,
+          playbackRate: 1,
+          position: Math.min(pos, dur)
+        });
+      } catch (e) {
+        console.warn("setPositionState failed:", e);
+      }
     }
   }
 }
@@ -501,8 +507,21 @@ export function getCurrentTime() {
 
 export function setOffsetTime(time: number) {
   offsetTime = time;
+}
+
+export function seekTo(
+  time: number,
+  volume: number,
+  eqGains: number[],
+  reverbDry: number,
+  reverbWet: number
+) {
+  offsetTime = time;
   if (playbackMode === 'stream' && mediaElement) {
     mediaElement.currentTime = time;
+    updateMediaPositionState();
+  } else if (playbackMode === 'buffer' && currentBuffer) {
+    playBuffer(currentBuffer, time, volume, eqGains, reverbDry, reverbWet);
   }
 }
 
