@@ -29,6 +29,12 @@ type Track = {
   filePath?: string;
 };
 
+const formatTime = (seconds: number) => {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s < 10 ? "0" : ""}${s}`;
+};
+
 export default function Home() {
   const [library, setLibrary] = useState<Track[]>([]);
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
@@ -56,23 +62,77 @@ export default function Home() {
 
   const requestRef = useRef<number | null>(null);
 
-  // Sync Library Metadata - Refined to prevent flickering and disappearing tracks
+  // Helper to load buffer if missing
+  const loadTrackBuffer = async (track: Track): Promise<AudioBuffer | null> => {
+    if (track.buffer) return track.buffer;
+    if (track.filePath) {
+      try {
+        const { data } = supabase.storage.from("eq-lab-tracks").getPublicUrl(track.filePath);
+        if (data?.publicUrl) {
+          const buffer = await loadAudio(data.publicUrl);
+          // Optional: Update track in library with buffer to cache it
+          setLibrary(prev => prev.map(t => t.id === track.id ? { ...t, buffer } : t));
+          return buffer;
+        }
+      } catch (e) {
+        console.error("Failed to load cloud track", e);
+      }
+    }
+    return null;
+  };
+
+  // Sync Library Metadata - Default Track
   useEffect(() => {
     const init = async () => {
       try {
-        // This will now return a sample buffer if base.wav is missing
         const buffer = await loadAudio("/audio/base.wav");
         const defaultTrack = { id: "default", name: "Sample Sound (Auto-generated)", buffer };
-        setLibrary([defaultTrack]);
-        setCurrentTrack(defaultTrack);
+        // Set default track initially
+        setLibrary(prev => {
+          if (prev.find(t => t.id === "default")) return prev;
+          return [defaultTrack, ...prev];
+        });
+        if (!currentTrack) setCurrentTrack(defaultTrack);
       } catch (e) {
-        console.warn("Base audio load skipped");
+        console.warn("Base audio load skipped or failed");
       }
     };
     init();
-  }, []);
+  }, []); // Run once
 
-  // Handle background/foreground to prevent audio glitches (looping sound)
+  // Sync Library Metadata - Cloud Tracks
+  useEffect(() => {
+    let isMounted = true;
+    const fetchTracks = async () => {
+      if (session?.user?.email) {
+        setIsLoadingLibrary(true);
+        const { data, error } = await supabase
+          .from("tracks")
+          .select("*")
+          .eq("user_email", session.user.email)
+          .order("created_at", { ascending: false });
+
+        if (isMounted) {
+          if (data && !error) {
+            const cloudTracks: Track[] = data.map(t => ({ id: t.id, name: t.name, filePath: t.file_path }));
+
+            setLibrary(prev => {
+              // Merge cloud tracks, avoiding duplicates if any
+              const existingIds = new Set(prev.map(t => t.id));
+              const newTracks = cloudTracks.filter(t => !existingIds.has(t.id));
+              return [...prev, ...newTracks];
+            });
+          }
+          setIsLoadingLibrary(false);
+        }
+      }
+    };
+
+    fetchTracks();
+    return () => { isMounted = false; };
+  }, [session?.user?.email, isLoadingSession]);
+
+  // Handle background/foreground
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
@@ -85,97 +145,108 @@ export default function Home() {
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, []);
 
-      if (session?.user?.email) {
-        setIsLoadingLibrary(true);
-        const { data, error } = await supabase
-          .from("tracks")
-          .select("*")
-          .eq("user_email", session.user.email)
-          .order("created_at", { ascending: false });
-
-        if (isMounted) {
-          if (data && !error) {
-            const cloudTracks = data.map(t => ({ id: t.id, name: t.name, filePath: t.file_path }));
-            setLibrary([...initLib, ...cloudTracks]);
-          } else {
-            setLibrary(initLib);
-          }
-          setIsLoadingLibrary(false);
-        }
-      } else {
-        if (isMounted) setLibrary(initLib);
-      }
-    };
-
-    fetchTracks();
-    return () => { isMounted = false; };
-  }, [session?.user?.email, isLoadingSession]);
-
   // Sync Presets
   useEffect(() => {
-    if (isLoadingSession || !session?.user?.email) return;
+    const userEmail = session?.user?.email;
+    if (isLoadingSession || !userEmail) return;
     const fetchPresets = async () => {
-      const { data } = await supabase.from("presets").select("*").eq("user_email", session.user.email).order("id", { ascending: true });
+      const { data } = await supabase.from("presets").select("*").eq("user_email", userEmail).order("id", { ascending: true });
       if (data) {
-        const formatted = data.map((p: any) => ({ id: p.id, name: p.name, eqGains: p.eq_gains, reverbDry: p.reverb_dry, reverbWet: p.reverb_wet, volume: p.volume }));
-        setPresets([...defaultPresets, ...formatted]);
+        const formatted = data.map((p: any) => ({
+          id: p.id,
+          name: p.name,
+          eqGains: p.eq_gains || [],
+          reverbDry: p.reverb_dry,
+          reverbWet: p.reverb_wet,
+          volume: p.volume
+        }));
+        setPresets(prev => {
+          // Avoid duplicates
+          const existingIds = new Set(prev.map(p => p.id));
+          const newPresets = formatted.filter((p: any) => !existingIds.has(p.id));
+          return [...defaultPresets, ...newPresets];
+        });
       }
     };
     fetchPresets();
   }, [session?.user?.email, isLoadingSession]);
 
   // Progress Loop
+  const updateProgress = () => {
+    const playing = getIsPlaying();
+    setIsPlaying(playing);
+    if (playing && !isDragging) {
+      setProgress(getCurrentTime());
+      setDuration(getDuration());
+    }
+    requestRef.current = requestAnimationFrame(updateProgress);
+  };
+
   useEffect(() => {
-    const loop = () => {
-      const playing = getIsPlaying();
-      setIsPlaying(playing);
-      if (playing && !isDragging) {
-        setProgress(getCurrentTime());
-        setDuration(getDuration());
-      }
-      requestRef.current = requestAnimationFrame(loop);
-    };
     requestRef.current = requestAnimationFrame(updateProgress);
     return () => {
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
     };
-  }, []);
+  }, [isDragging]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, mode: "library" | "source" | "target") => {
     const file = e.target.files?.[0];
-    if (file) {
-      try {
-        const buffer = await loadAudio(file);
-        const newTrack: Track = {
-          id: Math.random().toString(36).substr(2, 9),
-          name: file.name,
-          buffer
-        };
+    if (!file) return;
 
-        if (mode === "library") {
-          setLibrary(prev => [...prev, newTrack]);
-        } else if (mode === "source") {
-          setSourceTrack(newTrack);
-          setCurrentTrack(newTrack); // Auto-select for playback
-          setProgress(0);
-        } else if (mode === "target") {
-          setTargetTrack(newTrack);
+    try {
+      const buffer = await loadAudio(file);
+      let trackId = Math.random().toString(36).substr(2, 9);
+      let filePath = "";
+
+      // Upload to cloud if in library mode and logged in
+      const userEmail = session?.user?.email;
+      if (userEmail && mode === "library") {
+        filePath = `${userEmail}/${Date.now()}-${file.name}`;
+        const { error: uploadError } = await supabase.storage.from("eq-lab-tracks").upload(filePath, file);
+        if (!uploadError) {
+          const { data } = await supabase
+            .from("tracks")
+            .insert([{ user_email: userEmail, name: file.name, file_path: filePath }])
+            .select();
+          if (data) trackId = data[0].id;
         }
-      } catch (err) {
-        console.error("File upload failed", err);
-        alert("ファイルの読み込みに失敗しました。対応していない形式の可能性があります。");
       }
 
-      // Reset input value to allow re-uploading the same file if needed
-      e.target.value = "";
+      const newTrack: Track = { id: trackId, name: file.name, buffer, filePath };
+
+      if (mode === "library") {
+        setLibrary(prev => [newTrack, ...prev]);
+        // If no current track, set it
+        if (!currentTrack) setCurrentTrack(newTrack);
+      }
+      else if (mode === "source") {
+        setSourceTrack(newTrack);
+        // Also set as current to play it
+        setCurrentTrack(newTrack);
+        setProgress(0);
+      }
+      else if (mode === "target") {
+        setTargetTrack(newTrack);
+      }
+
+    } catch (err) {
+      console.error("File upload failed", err);
+      alert("ファイルの読み込みに失敗しました。");
     }
+
+    e.target.value = "";
   };
 
   const togglePlay = async () => {
-    if (isPlaying) stop();
-    else if (currentTrack) {
+    if (isPlaying) {
+      stop();
+      setIsPlaying(false);
+    } else if (currentTrack) {
       const buffer = await loadTrackBuffer(currentTrack);
-      if (buffer) playBuffer(buffer, progress, volume, eqGains, reverbDry, reverbWet);
+      if (buffer) {
+        playBuffer(buffer, progress, volume, eqGains, reverbDry, reverbWet);
+        setIsPlaying(true);
+      }
     }
   };
 
@@ -195,31 +266,12 @@ export default function Home() {
     if (!confirm(`Delete "${track.name}"?`)) return;
     try {
       if (track.filePath) await supabase.storage.from("eq-lab-tracks").remove([track.filePath]);
-      await supabase.from("tracks").delete().eq("id", id);
+      if (track.filePath) { // Only delete from DB if it was a cloud track (has filePath)
+        await supabase.from("tracks").delete().eq("id", id);
+      }
       setLibrary(prev => prev.filter(t => t.id !== id));
       if (currentTrack?.id === id) setCurrentTrack(null);
     } catch (e) { alert("Delete failed"); }
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, mode: "library" | "source" | "target") => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const buffer = await loadAudio(file);
-      let trackId = Math.random().toString(36).substr(2, 9);
-      let filePath = "";
-      if (session?.user?.email && mode === "library") {
-        filePath = `${session.user.email}/${Date.now()}-${file.name}`;
-        await supabase.storage.from("eq-lab-tracks").upload(filePath, file);
-        const { data } = await supabase.from("tracks").insert([{ user_email: session.user.email, name: file.name, file_path: filePath }]).select();
-        if (data) trackId = data[0].id;
-      }
-      const newTrack = { id: trackId, name: file.name, buffer, filePath };
-      if (mode === "library") setLibrary(prev => [newTrack, ...prev]);
-      else if (mode === "source") { setSourceTrack(newTrack); setCurrentTrack(newTrack); }
-      else if (mode === "target") setTargetTrack(newTrack);
-    } catch (e) { alert("Import failed"); }
-    e.target.value = "";
   };
 
   const handleEqChange = (index: number, value: number) => {
@@ -234,11 +286,48 @@ export default function Home() {
   };
 
   const savePreset = async () => {
-    if (!session?.user?.email) return alert("Login required");
+    const userEmail = session?.user?.email;
+    if (!userEmail) return alert("Login required");
     const name = prompt("Preset Name", "My Preset");
     if (!name) return;
-    const { data } = await supabase.from("presets").insert([{ name, user_email: session.user.email, eq_gains: eqGains, reverb_dry: reverbDry, reverb_wet: reverbWet, volume }]).select();
+    const { data } = await supabase.from("presets").insert([{ name, user_email: userEmail, eq_gains: eqGains, reverb_dry: reverbDry, reverb_wet: reverbWet, volume }]).select();
     if (data) setPresets(v => [...v, { id: data[0].id, name, eqGains: [...eqGains], reverbDry, reverbWet, volume }]);
+  };
+
+  const deletePreset = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm("This preset will be deleted.")) return;
+
+    const { error } = await supabase.from("presets").delete().eq("id", id);
+    if (!error) {
+      setPresets(prev => prev.filter(p => p.id !== id));
+    } else {
+      alert("Failed to delete preset");
+    }
+  };
+
+  const handleMatch = async () => {
+    const sTrack = sourceTrack || currentTrack;
+    if (!sTrack || !targetTrack) return;
+    setIsMatching(true);
+    try {
+      const sBuf = await loadTrackBuffer(sTrack);
+      const tBuf = await loadTrackBuffer(targetTrack);
+
+      if (sBuf && tBuf) {
+        const matchedGains = await getMatchingEq(sBuf, tBuf);
+        setEqGains(matchedGains);
+        matchedGains.forEach((g, i) => setEqGain(i, g));
+        alert("Matching Complete!");
+      } else {
+        alert("Could not load tracks for matching.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Matching Error");
+    } finally {
+      setIsMatching(false);
+    }
   };
 
   return (
@@ -267,24 +356,36 @@ export default function Home() {
               {library.map((track) => (
                 <div
                   key={track.id}
-                  onClick={() => {
+                  onClick={async () => {
                     setCurrentTrack(track);
                     setProgress(0);
-                    if (isPlaying) playBuffer(track.buffer, 0, volume, eqGains, reverbDry, reverbWet);
+                    // If playing, restart with new track
+                    if (isPlaying) {
+                      const buf = await loadTrackBuffer(track);
+                      if (buf) playBuffer(buf, 0, volume, eqGains, reverbDry, reverbWet);
+                    }
                   }}
                   className={`library-item ${currentTrack?.id === track.id ? "active" : ""}`}
                 >
-                  <span className="track-name">{track.name}</span>
-                  <span className="track-dur">{formatTime(track.buffer.duration)}</span>
+                  <div className="item-meta">
+                    <span className="track-name">{track.name}</span>
+                    <span className="track-dur">{track.buffer ? formatTime(track.buffer.duration) : "--:--"}</span>
+                  </div>
+                  {track.id !== "default" && (
+                    <button onClick={(e) => deleteTrack(track.id, e)} className="del-btn">×</button>
+                  )}
                 </div>
               ))}
             </div>
             <label className="upload-label">
               AUDIOを追加
               <input type="file" accept="audio/*" onChange={(e) => handleFileUpload(e, "library")} style={{ display: "none" }} />
+              <div className="add-btn">+</div>
             </label>
           </section>
+        </aside>
 
+        {/* EQ Panel (Center) */}
         <section className={`panel eq-panel ${activeTab === "eq" ? "show" : "hide"}`}>
           <div className="panel-head"><h2>EQ & EFFECTS</h2><button onClick={savePreset} className="btn-xs">Save</button></div>
           <div className="eq-scroll">
@@ -305,9 +406,10 @@ export default function Home() {
             </div></div>
             <div className="fx-box"><label>Output Gain</label><input type="range" min="0" max="1.5" step="0.01" value={volume} onChange={e => { const v = parseFloat(e.target.value); setGlobalVolume(v); setVolume(v); }} className="wide" /></div>
           </div>
-          <div className="pre-box"><label>PRESETS</label><div className="p-s">{presets.map(p => <button key={p.id} onClick={() => applyPreset(p)} className="chip">{p.name} {(p.id !== 'flat' && p.id !== 'concert-hall') && <span onClick={e => { e.stopPropagation(); deletePreset(p.id, e); }} className="p-del">×</span>}</button>)}</div></div>
+          <div className="pre-box"><label>PRESETS</label><div className="p-s">{presets.map(p => <button key={p.id} onClick={() => applyPreset(p)} className="chip">{p.name} {(p.id !== 'flat' && p.id !== 'concert-hall') && <span onClick={e => { deletePreset(p.id, e); }} className="p-del">×</span>}</button>)}</div></div>
         </section>
 
+        {/* Right Sidebar: Matching */}
         <section className={`panel m-panel ${activeTab === "matching" ? "show" : "hide"}`}>
           <h2>AI MATCHING</h2>
           <div className="m-field">
@@ -341,20 +443,22 @@ export default function Home() {
         .btn-s { background: var(--border); border: none; color: var(--text); padding: 6px 12px; border-radius: 4px; font-size: 0.8rem; cursor: pointer; }
         .btn-xs { background: var(--accent); color: #000; border: none; padding: 4px 10px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; cursor: pointer; }
         .btn-primary { width: 100%; background: var(--accent); color: #000; border: none; padding: 14px; border-radius: 8px; font-weight: bold; margin-top: 15px; cursor: pointer; }
-        .tabs { display: none; }
-        .main-content { flex: 1; display: grid; grid-template-columns: 320px 1fr 300px; overflow: hidden; }
+        .content-grid { flex: 1; display: grid; grid-template-columns: 320px 1fr 300px; overflow: hidden; }
         .panel { display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--p-bg); overflow: hidden; }
         .panel-head { padding: 20px; display: flex; justify-content: space-between; align-items: center; }
         h2 { font-size: 0.7rem; color: var(--text-m); letter-spacing: 1px; }
-        .list { flex: 1; overflow-y: auto; padding: 0 10px 120px; }
-        .item { padding: 10px 12px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; }
-        .item:hover { background: var(--hover); }
-        .item.active { background: var(--hover); color: var(--accent); }
-        .item-meta { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
-        .t-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .del-btn { background: none; border: none; color: var(--text-m); font-size: 1.1rem; cursor: pointer; opacity: 0; }
-        .item:hover .del-btn { opacity: 1; }
-        .add-btn { width: 30px; height: 30px; background: var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text); }
+        .library-section { display: flex; flex-direction: column; height: 100%; overflow: hidden; border-right: 1px solid var(--border);}
+        .track-list { flex: 1; overflow-y: auto; padding: 0 10px 20px; }
+        .library-item { padding: 10px 12px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; }
+        .library-item:hover { background: var(--hover); }
+        .active { background: var(--hover); color: var(--accent); }
+        .item-meta { display: flex; justify-content: space-between; width: 100%; align-items: center; }
+        .track-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
+        .del-btn { background: none; border: none; color: var(--text-m); font-size: 1.2rem; cursor: pointer; margin-left:10px;}
+        .del-btn:hover { color: #f00; }
+        .upload-label { padding: 15px; border-top: 1px solid var(--border); text-align: center; cursor: pointer; font-size: 0.8rem; display: flex; justify-content: center; align-items: center; gap: 10px; color: var(--text-m); }
+        .upload-label:hover { color: var(--text); }
+        .add-btn { width: 24px; height: 24px; background: var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; }
         .eq-scroll { flex: 1; overflow-x: auto; padding: 40px 20px 120px; scrollbar-width: none; }
         .eq-grid { display: flex; gap: 8px; min-width: max-content; }
         .eq-col { width: 40px; display: flex; flex-direction: column; align-items: center; gap: 15px; }
@@ -371,7 +475,7 @@ export default function Home() {
         .pre-box { padding: 0 20px 120px; }
         .p-s { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 10px; }
         .chip { background: var(--hover); border: 1px solid var(--border); color: var(--text); padding: 5px 12px; border-radius: 20px; font-size: 0.75rem; white-space: nowrap; display: flex; align-items: center; gap: 5px; cursor: pointer; }
-        .p-del { opacity: 0.3; }
+        .p-del { opacity: 0.3; } .p-del:hover { opacity: 1; color: #f00; }
         .m-panel { padding: 20px; }
         .m-field { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
         .m-row { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; }
@@ -383,16 +487,12 @@ export default function Home() {
         .p-bar { -webkit-appearance: none; height: 3px; background: var(--border); }
         .p-bar::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; background: var(--accent); border-radius: 50%; cursor: pointer; }
         @media (max-width: 768px) {
-          .tabs { display: grid; grid-template-columns: 1fr 1fr 1fr; border-bottom: 1px solid var(--border); }
-          .tabs button { padding: 12px; background: none; border: none; color: var(--text-m); font-size: 0.8rem; font-weight: bold; cursor: pointer; }
-          .tabs button.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
-          .main-content { grid-template-columns: 1fr; }
+          .content-grid { grid-template-columns: 1fr; }
           .panel { border-right: none; }
           .hide { display: none; } .show { display: flex; }
           .fx-grid { grid-template-columns: 1fr; }
           .player { bottom: 0; left: 0; right: 0; border-radius: 20px 20px 0 0; padding-bottom: 35px; }
         }
-        .loading { font-size: 0.8rem; color: var(--accent); text-align: center; padding: 10px; }
       `}</style>
     </main>
   );
