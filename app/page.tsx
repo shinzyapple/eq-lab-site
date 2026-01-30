@@ -350,7 +350,10 @@ export default function Home() {
       }
 
       if (userEmail && mode === "library") {
-        filePath = `${userEmail}/${Date.now()}-${file.name}`;
+        // Sanitise filename: keep extension, but use timestamp + random for the key part to avoid "Invalid key" with Japanese/special chars
+        const ext = file.name.split('.').pop();
+        const safeName = `${Date.now()}-${Math.random().toString(36).substr(2, 5)}.${ext}`;
+        filePath = `${userEmail}/${safeName}`;
         console.log(`Uploading to Supabase: ${filePath}`);
 
         const { error: uploadError } = await supabase.storage
@@ -470,7 +473,13 @@ export default function Home() {
       if (track.filePath) { // Only delete from DB if it was a cloud track (has filePath)
         await supabase.from("tracks").delete().eq("id", id);
       }
-      setLibrary(prev => prev.filter(t => t.id !== id));
+      setLibrary(prev => {
+        const filtered = prev.filter(t => t.id !== id);
+        // Persist to localStorage immediately
+        const toSave = filtered.map(t => ({ id: t.id, name: t.name, filePath: t.filePath }));
+        localStorage.setItem("eq-lab-library", JSON.stringify(toSave));
+        return filtered;
+      });
       if (currentTrack?.id === id) setCurrentTrack(null);
     } catch (e) { alert("Delete failed"); }
   };
@@ -530,13 +539,14 @@ export default function Home() {
 
   const deletePreset = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm("This preset will be deleted.")) return;
+    if (!confirm("このプリセットを削除しますか？")) return;
 
     const { error } = await supabase.from("presets").delete().eq("id", id);
     if (!error) {
       setPresets(prev => prev.filter(p => p.id !== id));
+      if (activePresetId === id) setActivePresetId(null);
     } else {
-      alert("Failed to delete preset");
+      alert("削除に失敗しました。");
     }
   };
 
