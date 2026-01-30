@@ -646,16 +646,16 @@ export default function Home() {
         @media (max-width: 768px) {
           .pc-only { display: none; }
           .mobile-only { display: block; }
-          .content-grid { grid-template-columns: 1fr; }
-          .left-sidebar, .panel { height: calc(100dvh - 200px); overflow-y: auto; padding-bottom: 120px; }
+          .content-grid { grid-template-columns: 1fr; flex: 1; overflow: hidden; }
+          .left-sidebar, .panel { height: 100%; overflow: hidden; display: flex; flex-direction: column; }
           .left-sidebar.show-mobile { width: 100%; border-right: none; }
           .hide-mobile { display: none; }
           .show-mobile { display: flex; flex-direction: column; width: 100%; }
-          .player { bottom: 70px; left: 0; right: 0; border-radius: 24px 24px 0 0; border: none; border-top: 1px solid var(--border); padding: 20px; padding-bottom: 25px; box-shadow: 0 -10px 30px rgba(0,0,0,0.5); }
-          .p-btn { width: 50px; height: 50px; font-size: 1.2rem; }
-          .p-bar { height: 6px; }
-          .p-bar::-webkit-slider-thumb { width: 16px; height: 16px; }
-          .mobile-nav { display: flex; position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: var(--p-bg); border-top: 1px solid var(--border); z-index: 1001; padding-bottom: constant(safe-area-inset-bottom); padding-bottom: env(safe-area-inset-bottom); }
+          .player { bottom: 75px; left: 0; right: 0; border-radius: 24px 24px 0 0; border: none; border-top: 1px solid var(--border); padding: 15px 20px 20px; box-shadow: 0 -10px 30px rgba(0,0,0,0.5); }
+          .p-btn { width: 45px; height: 45px; font-size: 1.1rem; }
+          .p-bar { height: 5px; }
+          .p-bar::-webkit-slider-thumb { width: 14px; height: 14px; }
+          .mobile-nav { display: flex; position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: var(--p-bg); border-top: 1px solid var(--border); z-index: 2001; padding-bottom: env(safe-area-inset-bottom); }
           .nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; background: none; border: none; color: var(--text-m); gap: 4px; transition: 0.2s; }
           .nav-item.active { color: var(--accent); }
           .nav-icon { font-size: 1.2rem; }
