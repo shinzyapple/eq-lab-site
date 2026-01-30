@@ -43,7 +43,7 @@ const formatTime = (seconds: number) => {
 export default function Home() {
   const [library, setLibrary] = useState<Track[]>([]);
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
-  const [activeTab, setActiveTab] = useState<"library" | "eq" | "matching">("eq");
+  const [activeTab, setActiveTab] = useState<"library" | "eq" | "matching">("library");
   const [theme, setTheme] = useState<"dark" | "light">("dark");
 
   const [eqGains, setEqGains] = useState<number[]>(new Array(31).fill(0));
@@ -610,6 +610,8 @@ export default function Home() {
         .mobile-eq-hint { padding: 20px; text-align: center; color: var(--text-m); font-size: 0.75rem; line-height: 1.6; }
         .player { position: fixed; bottom: 20px; left: 20px; right: 20px; z-index: 1000; padding: 15px 25px; background: var(--player); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid var(--border); border-radius: 20px; display: flex; align-items: center; gap: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.4); }
         .mobile-nav { display: none; }
+        .left-sidebar { display: flex; flex-direction: column; background: var(--p-bg); border-right: 1px solid var(--border); overflow: hidden; }
+
         @media (max-width: 768px) {
           .pc-only { display: none; }
           .mobile-only { display: block; }
@@ -628,7 +630,6 @@ export default function Home() {
           .nav-icon { font-size: 1.2rem; }
           .nav-label { font-size: 0.65rem; font-weight: bold; }
         }
-        .left-sidebar { display: flex; flex-direction: column; background: var(--p-bg); border-right: 1px solid var(--border); overflow: hidden; }
       `}</style>
     </main >
   );
