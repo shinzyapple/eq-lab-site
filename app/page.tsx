@@ -79,24 +79,31 @@ export default function Home() {
     if (track.buffer) return track.buffer;
     if (track.filePath) {
       try {
-        console.log(`Downloading track from Supabase Storage: ${track.filePath}`);
+        console.log(`Downloading track: ${track.filePath}`);
         const { data, error } = await supabase.storage.from("eq-lab-tracks").download(track.filePath);
 
         if (error) {
-          console.error("Supabase storage download error:", error);
-          throw error;
+          console.error("Download Error:", error);
+          alert(`楽曲のダウンロードに失敗しました: ${error.message}`);
+          return null;
         }
 
         if (data) {
+          console.log(`Download complete, decoding...`);
           const buffer = await loadAudio(new File([data], track.name));
-          // Update track in library and current selection with buffer to cache it
+
+          // Update library cache
           const updater = (t: Track) => t.id === track.id ? { ...t, buffer } : t;
           setLibrary(prev => prev.map(updater));
-          setCurrentTrack(curr => curr?.id === track.id ? updater(curr) : curr);
+
+          // CRITICAL: Also update currentTrack so subsequent calls find the buffer
+          setCurrentTrack(curr => curr?.id === track.id ? { ...curr, buffer } : curr);
+
           return buffer;
         }
-      } catch (e) {
+      } catch (e: any) {
         console.error("Failed to load cloud track:", e);
+        alert(`楽曲の解析に失敗しました: ${e.message || '不明なエラー'}`);
       }
     }
     return null;
@@ -432,20 +439,34 @@ export default function Home() {
   };
 
   const togglePlay = async () => {
-    // CRITICAL: Initialize context on direct click for iOS
+    // 1. Context Init
     await initContext();
 
     if (isPlaying) {
       stop();
       setIsPlaying(false);
-    } else if (currentTrack) {
+    } else {
+      if (!currentTrack) {
+        alert("再生する曲をライブラリから選択してください。");
+        return;
+      }
+
+      console.log(`Attempting to play: ${currentTrack.name}`);
       if (!currentTrack.buffer) setIsBuffering(true);
+
       try {
         const buffer = await loadTrackBuffer(currentTrack);
         if (buffer) {
+          // Re-resume context right before play in case async fetch suspended it
+          await initContext();
           playBuffer(buffer, progress, volume, eqGains, reverbDry, reverbWet);
           setIsPlaying(true);
+        } else {
+          console.error("No buffer returned from loadTrackBuffer");
         }
+      } catch (e: any) {
+        console.error("Playback error:", e);
+        alert(`再生エラー: ${e.message}`);
       } finally {
         setIsBuffering(false);
       }

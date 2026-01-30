@@ -44,8 +44,10 @@ function createImpulseResponse(context: AudioContext, duration: number, decay: n
 
 export async function initContext() {
   if (typeof window === "undefined") return null;
+  console.log("initContext called, current state:", audioContext?.state);
   if (!audioContext) {
     audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    console.log("AudioContext created");
 
     // Create a proxy audio element to keep playback alive in background
     streamDest = audioContext.createMediaStreamDestination();
@@ -56,11 +58,15 @@ export async function initContext() {
     // On desktop we use main destination. On iOS this keeps background session alive.
     proxyAudio.muted = true;
 
+    // Prime the proxy audio immediately
+    proxyAudio.play().catch(e => console.log("Proxy audio priming failed:", e));
+
     // Resume context on first user interaction if it starts suspended
     if (audioContext.state === "suspended") {
       audioContext.resume();
     }
   } else if (audioContext.state === "suspended") {
+    console.log("Resuming suspended context");
     await audioContext.resume();
   }
   return audioContext;
@@ -95,11 +101,17 @@ export async function loadAudio(urlOrFile: string | File): Promise<AudioBuffer> 
       arrayBuffer = await urlOrFile.arrayBuffer();
     }
 
+    console.log(`ArrayBuffer obtained: ${arrayBuffer.byteLength} bytes. Starting decode...`);
+    if (arrayBuffer.byteLength === 0) throw new Error("File is empty (0 bytes)");
+
     // Support both promise-based and callback-based decodeAudioData
     return await new Promise<AudioBuffer>((resolve, reject) => {
       ctx.decodeAudioData(
         arrayBuffer,
-        (decoded) => resolve(decoded),
+        (decoded) => {
+          console.log("Audio decoded successfully", { duration: decoded.duration, channels: decoded.numberOfChannels });
+          resolve(decoded);
+        },
         (err) => {
           console.error("decodeAudioData error:", err);
           // If it fails, try a fallback or just reject
@@ -143,7 +155,11 @@ export function playBuffer(
   reverbDry = 1.0,
   reverbWet = 0.2
 ) {
-  if (!audioContext) return;
+  if (!audioContext) {
+    console.error("playBuffer failed: AudioContext not initialized");
+    return;
+  }
+  console.log(`playBuffer called at ${startAt}s. Context state: ${audioContext.state}`);
 
   stop();
 
