@@ -68,6 +68,7 @@ export default function Home() {
   const [updatedAt, setUpdatedAt] = useState<string>("");
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
 
   const requestRef = useRef<number | null>(null);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -334,6 +335,7 @@ export default function Home() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setIsUploading(true);
     try {
       let buffer: AudioBuffer | undefined;
       let trackId = Math.random().toString(36).substr(2, 9);
@@ -341,24 +343,36 @@ export default function Home() {
 
       const userEmail = session?.user?.email;
 
-      // OPTIMIZATION: On mobile, decoding large files immediately causes OOM/Reload.
-      // If we are uploading to cloud, skip local decode here.
+      // On mobile, large files + parsing = crash.
+      // We skip local decode if we are uploading to cloud.
       if (mode !== "library" || !userEmail) {
-        // Guest or Matching source/target: needs immediate decoding
         buffer = await loadAudio(file);
       }
 
       if (userEmail && mode === "library") {
         filePath = `${userEmail}/${Date.now()}-${file.name}`;
-        // Upload without decoding first
-        const { error: uploadError } = await supabase.storage.from("eq-lab-tracks").upload(filePath, file);
-        if (!uploadError) {
-          const { data } = await supabase
-            .from("tracks")
-            .insert([{ user_email: userEmail, name: file.name, file_path: filePath }])
-            .select();
-          if (data) trackId = data[0].id;
+        console.log(`Uploading to Supabase: ${filePath}`);
+
+        const { error: uploadError } = await supabase.storage
+          .from("eq-lab-tracks")
+          .upload(filePath, file, { cacheControl: '3600', upsert: false });
+
+        if (uploadError) {
+          console.error("Cloud Storage Upload Error:", uploadError);
+          throw new Error(`Cloud storage upload failed: ${uploadError.message}`);
         }
+
+        const { data, error: dbError } = await supabase
+          .from("tracks")
+          .insert([{ user_email: userEmail, name: file.name, file_path: filePath }])
+          .select();
+
+        if (dbError) {
+          console.error("Database Insert Error:", dbError);
+          throw new Error(`Database entry failed: ${dbError.message}`);
+        }
+
+        if (data) trackId = data[0].id;
       }
 
       const newTrack: Track = { id: trackId, name: file.name, buffer, filePath };
@@ -371,7 +385,6 @@ export default function Home() {
           localStorage.setItem("eq-lab-library", JSON.stringify(toSave));
           return updated;
         });
-        // On mobile, don't set as current immediately to avoid unintended play attempt
         if (window.innerWidth > 768) {
           setCurrentTrack(curr => curr || newTrack);
         }
@@ -385,9 +398,11 @@ export default function Home() {
         setTargetTrack(newTrack);
       }
 
-    } catch (err) {
-      console.error("File upload failed", err);
-      alert("読み込みに失敗しました。ファイルサイズが大きすぎるか、メモリ不足の可能性があります。");
+    } catch (err: any) {
+      console.error("Upload process failed:", err);
+      alert(`アップロードに失敗しました: ${err.message || '不明なエラー'}`);
+    } finally {
+      setIsUploading(false);
     }
 
     e.target.value = "";
@@ -606,7 +621,13 @@ export default function Home() {
             </div>
 
             <div className="track-list">
-              {library.length === 0 && (
+              {isUploading && (
+                <div className="uploading-indicator">
+                  <span className="loader-s"></span>
+                  <span>Uploading to Cloud...</span>
+                </div>
+              )}
+              {library.length === 0 && !isUploading && (
                 <p style={{ fontSize: "0.7rem", opacity: 0.5, textAlign: "center", padding: "40px 20px" }}>
                   音声ファイルがありません。<br />ここにドロップするか、上の＋ボタンから追加してください。
                 </p>
@@ -758,8 +779,9 @@ export default function Home() {
         .section-head-row { padding: 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); }
         .p-btn { width: 45px; height: 45px; border-radius: 50%; background: var(--accent); border: none; font-size: 1rem; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #fff; position: relative; }
         .p-btn.buffering { background: var(--border); color: var(--text-m); cursor: wait; }
-        .loader-s { width: 20px; height: 20px; border: 2px solid var(--text-m); border-bottom-color: transparent; border-radius: 50%; display: inline-block; animation: rotation 1s linear infinite; }
+        .loader-s { width: 20px; height: 20px; border: 2px solid var(--accent); border-bottom-color: transparent; border-radius: 50%; display: inline-block; animation: rotation 1s linear infinite; }
         @keyframes rotation { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .uploading-indicator { padding: 20px; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 0.8rem; color: var(--accent); background: rgba(168, 85, 247, 0.1); border-radius: 8px; margin: 10px; border: 1px dashed var(--accent); }
         .p-info { flex: 1; display: flex; flex-direction: column; gap: 5px; }
         .add-icon-btn:hover { background: var(--accent); color: #000; }
         .drag-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; font-size: 0.9rem; color: var(--accent); pointer-events: none; z-index: 10; font-weight: bold; }
