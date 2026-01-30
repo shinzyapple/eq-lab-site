@@ -548,11 +548,18 @@ export default function Home() {
             <p>※ 31バンドEQの詳細調整はPC版のみ可能です。<br />スマホ版ではプリセットを選択してください。</p>
           </div>
           <div className="fx-grid">
-            <div className="fx-box"><label>Reverb Dry/Wet</label><div className="f-r">
-              <input type="range" min="0" max="1" step="0.01" value={reverbDry} onChange={e => { const v = parseFloat(e.target.value); setRevDry(v); setReverbDry(v); }} />
-              <input type="range" min="0" max="1" step="0.01" value={reverbWet} onChange={e => { const v = parseFloat(e.target.value); setRevWet(v); setReverbWet(v); }} />
-            </div></div>
-            <div className="fx-box"><label>Output Gain</label><input type="range" min="0" max="1.5" step="0.01" value={volume} onChange={e => { const v = parseFloat(e.target.value); setGlobalVolume(v); setVolume(v); }} className="wide" /></div>
+            <div className="fx-box">
+              <label>Reverb Dry: {Math.round(reverbDry * 100)}%</label>
+              <input type="range" min="0" max="1" step="0.01" value={reverbDry} onChange={e => { const v = parseFloat(e.target.value); setRevDry(v); setReverbDry(v); }} className="fx-range" />
+            </div>
+            <div className="fx-box">
+              <label>Reverb Wet: {Math.round(reverbWet * 100)}%</label>
+              <input type="range" min="0" max="1" step="0.01" value={reverbWet} onChange={e => { const v = parseFloat(e.target.value); setRevWet(v); setReverbWet(v); }} className="fx-range" />
+            </div>
+            <div className="fx-box full-width">
+              <label>Output Gain: {Math.round(volume * 100)}%</label>
+              <input type="range" min="0" max="1.5" step="0.01" value={volume} onChange={e => { const v = parseFloat(e.target.value); setGlobalVolume(v); setVolume(v); }} className="fx-range wide" />
+            </div>
           </div>
           <div className="pre-box">
             <label>PRESETS LIST</label>
@@ -659,6 +666,8 @@ export default function Home() {
         .fx-box label { font-size: 0.65rem; color: var(--text-m); font-weight: bold; }
         .f-r { display: flex; flex-direction: column; gap: 5px; }
         input[type="range"] { -webkit-appearance: none; height: 3px; background: var(--border); border-radius: 2px; }
+        .fx-range { -webkit-appearance: none; width: 100%; height: 6px; background: var(--border); border-radius: 3px; outline: none; margin: 10px 0; }
+        .fx-range::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; background: var(--accent); border-radius: 50%; border: 3px solid #fff; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.3); }
         .pre-box { padding: 0 20px 20px; flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
         .preset-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 10px 0 160px; }
         .preset-item { padding: 12px 16px; background: var(--hover); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.85rem; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: 0.2s; }
@@ -678,6 +687,10 @@ export default function Home() {
         @media (max-width: 768px) {
           .pc-only { display: none; }
           .mobile-only { display: block; }
+          .fx-grid { grid-template-columns: 1fr; gap: 15px; padding: 15px; }
+          .fx-box.full-width { grid-column: 1; }
+          .fx-range { height: 10px; }
+          .fx-range::-webkit-slider-thumb { width: 28px; height: 28px; }
           .content-grid { grid-template-columns: 1fr; flex: 1; overflow: hidden; }
           .left-sidebar, .panel { height: 100%; overflow: hidden; display: flex; flex-direction: column; }
           .left-sidebar.show-mobile { width: 100%; border-right: none; }
