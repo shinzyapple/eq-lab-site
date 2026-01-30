@@ -132,17 +132,20 @@ export default function Home() {
       if (!isMounted) return;
 
       // 3. Update library state atomically
-      const combined = defaultTrack ? [defaultTrack, ...cloudTracks] : cloudTracks;
-      setLibrary(combined);
+      setLibrary(prev => {
+        // Merge cloud tracks into the library, keeping local-only tracks (newly uploaded)
+        const cloudIds = new Set(cloudTracks.map(t => t.id));
+        const locals = prev.filter(t => !cloudIds.has(t.id) && t.id !== "default");
+        const combined = defaultTrack ? [defaultTrack, ...locals, ...cloudTracks] : [...locals, ...cloudTracks];
 
-      // 4. Initial selection: only if none exists or we just loaded cloud data
-      setCurrentTrack(curr => {
-        if (curr) {
-          // Keep current selection but sync with updated library item (for buffers etc)
+        // Update currentTrack if it needs a buffer sync
+        setCurrentTrack(curr => {
+          if (!curr) return combined[0] || null;
           const matched = combined.find(t => t.id === curr.id);
           return matched || curr;
-        }
-        return combined[0] || null;
+        });
+
+        return combined;
       });
     };
 
@@ -234,9 +237,12 @@ export default function Home() {
       const newTrack: Track = { id: trackId, name: file.name, buffer, filePath };
 
       if (mode === "library") {
-        setLibrary(prev => [newTrack, ...prev]);
-        // If no current track, set it
-        if (!currentTrack) setCurrentTrack(newTrack);
+        setLibrary(prev => {
+          // Prevent exact duplicates by ID
+          if (prev.find(t => t.id === newTrack.id)) return prev;
+          return [newTrack, ...prev];
+        });
+        setCurrentTrack(curr => curr || newTrack);
       }
       else if (mode === "source") {
         setSourceTrack(newTrack);
