@@ -680,6 +680,12 @@ export default function Home() {
             </div>
 
             <div className="track-list">
+              {isLoadingLibrary && (
+                <div className="library-loading">
+                  <span className="loader-s"></span>
+                  <span>Syncing with Cloud...</span>
+                </div>
+              )}
               {isUploading && (
                 <div className="uploading-indicator">
                   <span className="loader-s"></span>
@@ -841,6 +847,8 @@ export default function Home() {
         .loader-s { width: 20px; height: 20px; border: 2px solid var(--accent); border-bottom-color: transparent; border-radius: 50%; display: inline-block; animation: rotation 1s linear infinite; }
         @keyframes rotation { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .uploading-indicator { padding: 20px; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 0.8rem; color: var(--accent); background: rgba(168, 85, 247, 0.1); border-radius: 8px; margin: 10px; border: 1px dashed var(--accent); }
+        .library-loading { padding: 30px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 15px; font-size: 0.85rem; color: var(--text-m); border-bottom: 1px solid var(--border); }
+        .library-loading .loader-s { width: 24px; height: 24px; }
         .p-info { flex: 1; display: flex; flex-direction: column; gap: 5px; }
         .add-icon-btn:hover { background: var(--accent); color: #000; }
         .drag-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; font-size: 0.9rem; color: var(--accent); pointer-events: none; z-index: 10; font-weight: bold; }
