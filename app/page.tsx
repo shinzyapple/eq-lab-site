@@ -71,6 +71,7 @@ export default function Home() {
 
   const requestRef = useRef<number | null>(null);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Helper to load buffer if missing
   const loadTrackBuffer = async (track: Track): Promise<AudioBuffer | null> => {
@@ -334,14 +335,22 @@ export default function Home() {
     if (!file) return;
 
     try {
-      const buffer = await loadAudio(file);
+      let buffer: AudioBuffer | undefined;
       let trackId = Math.random().toString(36).substr(2, 9);
       let filePath = "";
 
-      // Upload to cloud if in library mode and logged in
       const userEmail = session?.user?.email;
+
+      // OPTIMIZATION: On mobile, decoding large files immediately causes OOM/Reload.
+      // If we are uploading to cloud, skip local decode here.
+      if (mode !== "library" || !userEmail) {
+        // Guest or Matching source/target: needs immediate decoding
+        buffer = await loadAudio(file);
+      }
+
       if (userEmail && mode === "library") {
         filePath = `${userEmail}/${Date.now()}-${file.name}`;
+        // Upload without decoding first
         const { error: uploadError } = await supabase.storage.from("eq-lab-tracks").upload(filePath, file);
         if (!uploadError) {
           const { data } = await supabase
@@ -356,19 +365,19 @@ export default function Home() {
 
       if (mode === "library") {
         setLibrary(prev => {
-          // Prevent exact duplicates by ID
           if (prev.find(t => t.id === newTrack.id)) return prev;
           const updated = [newTrack, ...prev];
-          // Save to local storage immediately
           const toSave = updated.map(t => ({ id: t.id, name: t.name, filePath: t.filePath }));
           localStorage.setItem("eq-lab-library", JSON.stringify(toSave));
           return updated;
         });
-        setCurrentTrack(curr => curr || newTrack);
+        // On mobile, don't set as current immediately to avoid unintended play attempt
+        if (window.innerWidth > 768) {
+          setCurrentTrack(curr => curr || newTrack);
+        }
       }
       else if (mode === "source") {
         setSourceTrack(newTrack);
-        // Also set as current to play it
         setCurrentTrack(newTrack);
         setProgress(0);
       }
@@ -378,7 +387,7 @@ export default function Home() {
 
     } catch (err) {
       console.error("File upload failed", err);
-      alert("ファイルの読み込みに失敗しました。");
+      alert("読み込みに失敗しました。ファイルサイズが大きすぎるか、メモリ不足の可能性があります。");
     }
 
     e.target.value = "";
@@ -405,6 +414,9 @@ export default function Home() {
   };
 
   const togglePlay = async () => {
+    // CRITICAL: Initialize context on direct click for iOS
+    await initContext();
+
     if (isPlaying) {
       stop();
       setIsPlaying(false);
@@ -577,10 +589,20 @@ export default function Home() {
           >
             <div className="section-head-row">
               <h2 className="section-title">ライブラリ</h2>
-              <label className="add-icon-btn" title="AUDIOを追加">
-                <input type="file" accept="audio/*, .mp3, .wav, .m4a, .aac, .ogg" onChange={(e) => handleFileUpload(e, "library")} style={{ display: "none" }} />
+              <button
+                className="add-icon-btn"
+                onClick={() => fileInputRef.current?.click()}
+                title="AUDIOを追加"
+              >
                 +
-              </label>
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="audio/*, .mp3, .wav, .m4a, .aac, .ogg"
+                onChange={(e) => handleFileUpload(e, "library")}
+                style={{ display: "none" }}
+              />
             </div>
 
             <div className="track-list">
@@ -593,9 +615,9 @@ export default function Home() {
                 <div
                   key={track.id}
                   onClick={async () => {
+                    await initContext();
                     setCurrentTrack(track);
                     setProgress(0);
-                    // If playing, restart with new track
                     if (isPlaying) {
                       const buf = await loadTrackBuffer(track);
                       if (buf) playBuffer(buf, 0, volume, eqGains, reverbDry, reverbWet);

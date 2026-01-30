@@ -51,11 +51,17 @@ export async function initContext() {
     streamDest = audioContext.createMediaStreamDestination();
     proxyAudio = new Audio();
     proxyAudio.srcObject = streamDest.stream;
-    // Essential for background audio
     proxyAudio.setAttribute("playsinline", "true");
-  }
-  if (audioContext.state === "suspended") {
-    audioContext.resume();
+    // Mute proxy audio element but keep stream active. 
+    // On desktop we use main destination. On iOS this keeps background session alive.
+    proxyAudio.muted = true;
+
+    // Resume context on first user interaction if it starts suspended
+    if (audioContext.state === "suspended") {
+      audioContext.resume();
+    }
+  } else if (audioContext.state === "suspended") {
+    await audioContext.resume();
   }
   return audioContext;
 }
@@ -91,24 +97,26 @@ export async function loadAudio(urlOrFile: string | File): Promise<AudioBuffer> 
 
     // Support both promise-based and callback-based decodeAudioData
     return await new Promise<AudioBuffer>((resolve, reject) => {
-      const successCallback = (decodedBuffer: AudioBuffer) => resolve(decodedBuffer);
-      const errorCallback = (error: Error) => {
-        console.error("decodeAudioData error:", error);
-        reject(error);
-      };
-
-      const result = ctx.decodeAudioData(arrayBuffer, successCallback, errorCallback);
-      if (result && typeof result.then === "function") {
-        result.then(resolve).catch(reject);
-      }
+      ctx.decodeAudioData(
+        arrayBuffer,
+        (decoded) => resolve(decoded),
+        (err) => {
+          console.error("decodeAudioData error:", err);
+          // If it fails, try a fallback or just reject
+          reject(err);
+        }
+      ).catch(e => {
+        // Some older browsers/implementations might throw or need this
+        console.error("decodeAudioData promise catch:", e);
+        reject(e);
+      });
     });
-
-  } catch (e) {
-    console.warn("Failed to load audio source:", e);
+  } catch (err) {
+    console.error("loadAudio unexpected error:", err);
     // Only return sample buffer for URLs (like base.wav) as a safe fallback.
     // For Files, throw so the UI can catch it and alert the user.
     if (typeof urlOrFile !== "string") {
-      throw e;
+      throw err;
     }
     return createSampleBuffer(ctx);
   }
@@ -180,13 +188,12 @@ export function playBuffer(
   reverbWetGain.connect(mainGainNode);
 
   // PIPE OUTPUT
-  // To avoid double audio, we ONLY connect to the streamDest which is played by proxyAudio.
-  // This is essential for iPhone background playback to work with Web Audio API.
+  // Connect to main destination for standard playback (PC/Mac)
+  mainGainNode.connect(audioContext.destination);
+
+  // Also connect to streamDest for proxyAudio (iPhone background)
   if (streamDest) {
     mainGainNode.connect(streamDest);
-  } else {
-    // Fallback for environments where MediaStreamDestination isn't supported (rare)
-    mainGainNode.connect(audioContext.destination);
   }
 
   if (proxyAudio) {
