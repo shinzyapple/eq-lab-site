@@ -19,7 +19,9 @@ import {
   suspendContext,
   resumeContext,
   initContext,
-  createSampleBuffer
+  createSampleBuffer,
+  setAudioEngineCallbacks,
+  updateMediaMetadata
 } from "@/lib/audioEngine";
 import { defaultPresets, Preset } from "@/lib/presets";
 import { supabase } from "@/lib/supabaseClient";
@@ -173,15 +175,37 @@ export default function Home() {
   // Handle background/foreground
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden") {
-        suspendContext();
-      } else {
+      // Don't suspend if audio is playing, but resume if returning
+      if (document.visibilityState === "visible") {
         resumeContext();
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, []);
+
+  // Register Media Session Callbacks
+  useEffect(() => {
+    setAudioEngineCallbacks({
+      onPlaybackChange: (playing) => {
+        if (playing) {
+          if (!isPlaying && currentTrack) togglePlay();
+        } else {
+          if (isPlaying) togglePlay();
+        }
+      },
+      onSeekTo: (time) => {
+        handleManualSeek(time);
+      }
+    });
+  }, [isPlaying, currentTrack, progress, volume, eqGains, reverbDry, reverbWet]);
+
+  // Update Media Metadata when track changes
+  useEffect(() => {
+    if (currentTrack) {
+      updateMediaMetadata(currentTrack.name);
+    }
+  }, [currentTrack]);
 
   // Sync Presets
   useEffect(() => {

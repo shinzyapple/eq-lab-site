@@ -12,6 +12,16 @@ let reverbDryGain: GainNode | null = null;
 let mainGainNode: GainNode | null = null;
 let streamDest: MediaStreamAudioDestinationNode | null = null;
 let proxyAudio: HTMLAudioElement | null = null;
+let onPlaybackChange: ((playing: boolean) => void) | null = null;
+let onSeekTo: ((time: number) => void) | null = null;
+
+export function setAudioEngineCallbacks(callbacks: {
+  onPlaybackChange?: (playing: boolean) => void;
+  onSeekTo?: (time: number) => void;
+}) {
+  if (callbacks.onPlaybackChange) onPlaybackChange = callbacks.onPlaybackChange;
+  if (callbacks.onSeekTo) onSeekTo = callbacks.onSeekTo;
+}
 
 let currentBuffer: AudioBuffer | null = null;
 let startTime = 0;
@@ -182,14 +192,46 @@ export function playBuffer(
   source.start(0, startAt);
   isPlayingInternal = true;
 
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.playbackState = 'playing';
+  }
+
   source.onended = () => {
     if (!source) return; // Already stopped manually
     const playedTime = audioContext!.currentTime - startTime;
     if (playedTime >= (buffer.duration - startAt - 0.1)) {
       isPlayingInternal = false;
       offsetTime = 0;
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'none';
+      }
     }
   };
+}
+
+export function updateMediaMetadata(title: string, artist: string = 'EQ LAB', album: string = 'Audio Library', artworkUrl?: string) {
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: title,
+      artist: artist,
+      album: album,
+      artwork: artworkUrl ? [{ src: artworkUrl, sizes: '512x512', type: 'image/png' }] : [
+        { src: '/favicon.ico', sizes: '128x128', type: 'image/x-icon' }
+      ]
+    });
+
+    navigator.mediaSession.setActionHandler('play', () => {
+      if (onPlaybackChange) onPlaybackChange(true);
+    });
+    navigator.mediaSession.setActionHandler('pause', () => {
+      if (onPlaybackChange) onPlaybackChange(false);
+    });
+    navigator.mediaSession.setActionHandler('seekto', (details) => {
+      if (details.seekTime !== undefined && onSeekTo) {
+        onSeekTo(details.seekTime);
+      }
+    });
+  }
 }
 
 export async function analyzeBuffer(buffer: AudioBuffer): Promise<number[]> {
@@ -257,4 +299,7 @@ export function stop() {
     source = null;
   }
   isPlayingInternal = false;
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.playbackState = 'paused';
+  }
 }
