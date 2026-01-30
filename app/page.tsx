@@ -96,8 +96,9 @@ export default function Home() {
   // Unified Library Sync: Handles both local default and cloud tracks
   useEffect(() => {
     let isMounted = true;
+
     const syncLibrary = async () => {
-      // 1. Prepare default track
+      // 1. Prepare default track (base.wav or fallback warning tone)
       let defaultTrack: Track | null = null;
       try {
         const buffer = await loadAudio("/audio/base.wav");
@@ -115,43 +116,54 @@ export default function Home() {
       // 2. Fetch cloud tracks if authenticated
       let cloudTracks: Track[] = [];
       const userEmail = session?.user?.email;
-      if (userEmail) {
+      if (userEmail && !isLoadingSession) {
         setIsLoadingLibrary(true);
-        const { data, error } = await supabase
-          .from("tracks")
-          .select("*")
-          .eq("user_email", userEmail)
-          .order("created_at", { ascending: false });
+        try {
+          const { data, error } = await supabase
+            .from("tracks")
+            .select("*")
+            .eq("user_email", userEmail)
+            .order("created_at", { ascending: false });
 
-        if (isMounted && data && !error) {
-          cloudTracks = data.map(t => ({ id: t.id, name: t.name, filePath: t.file_path }));
+          if (isMounted && data && !error) {
+            cloudTracks = data.map(t => ({ id: t.id, name: t.name, filePath: t.file_path }));
+          }
+        } catch (err) {
+          console.error("Supabase fetch error:", err);
+        } finally {
+          if (isMounted) setIsLoadingLibrary(false);
         }
-        if (isMounted) setIsLoadingLibrary(false);
       }
 
       if (!isMounted) return;
 
-      // 3. Update library state atomically
+      // 3. Atomically update the library
+      // We use a functional update to make sure we don't overwrite newly uploaded tracks
       setLibrary(prev => {
-        // Merge cloud tracks into the library, keeping local-only tracks (newly uploaded)
         const cloudIds = new Set(cloudTracks.map(t => t.id));
-        const locals = prev.filter(t => !cloudIds.has(t.id) && t.id !== "default");
-        const combined = defaultTrack ? [defaultTrack, ...locals, ...cloudTracks] : [...locals, ...cloudTracks];
-
-        // Update currentTrack if it needs a buffer sync
-        setCurrentTrack(curr => {
-          if (!curr) return combined[0] || null;
-          const matched = combined.find(t => t.id === curr.id);
-          return matched || curr;
-        });
-
-        return combined;
+        // Keep anything that is NOT in the cloud results and is NOT the default track
+        // (This preserves tracks uploaded in this session that haven't been "synced" yet)
+        const currentLocals = prev.filter(t => !cloudIds.has(t.id) && t.id !== "default");
+        return defaultTrack ? [defaultTrack, ...currentLocals, ...cloudTracks] : [...currentLocals, ...cloudTracks];
       });
     };
 
     syncLibrary();
     return () => { isMounted = false; };
   }, [session?.user?.email, isLoadingSession]);
+
+  // Handle currentTrack initialization and synchronization
+  useEffect(() => {
+    if (library.length > 0 && !currentTrack) {
+      setCurrentTrack(library[0]);
+    } else if (currentTrack) {
+      // Sync currentTrack's buffer/metadata if library contains it (e.g. after download)
+      const matched = library.find(t => t.id === currentTrack.id);
+      if (matched && matched.buffer && !currentTrack.buffer) {
+        setCurrentTrack(matched);
+      }
+    }
+  }, [library]);
 
   // Handle background/foreground
   useEffect(() => {
