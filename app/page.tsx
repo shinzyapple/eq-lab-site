@@ -102,6 +102,17 @@ export default function Home() {
   useEffect(() => {
     let isMounted = true;
 
+    // Load local storage on mount
+    const saved = localStorage.getItem("eq-lab-library");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        // We only keep metadata, not buffers
+        const metadataOnly = parsed.map((t: any) => ({ ...t, buffer: undefined }));
+        setLibrary(metadataOnly);
+      } catch (e) { console.error("Failed to parse saved library"); }
+    }
+
     const syncLibrary = async () => {
       console.log("Starting library sync...");
 
@@ -149,10 +160,15 @@ export default function Home() {
       // 3. Atomically update the library
       setLibrary(prev => {
         const cloudIds = new Set(cloudTracks.map(t => t.id));
-        // Keep uploaded tracks that aren't in the cloud results yet
+        // Keep local tracks (including guest ones)
         const locals = prev.filter(t => !cloudIds.has(t.id) && t.id !== "default");
         const combined = defaultTrack ? [defaultTrack, ...locals, ...cloudTracks] : [...locals, ...cloudTracks];
-        console.log(`Library updated: ${combined.length} tracks`);
+
+        // Persist metadata to localStorage (filter out buffers)
+        const toSave = combined.map(t => ({ id: t.id, name: t.name, filePath: t.filePath }));
+        localStorage.setItem("eq-lab-library", JSON.stringify(toSave));
+
+        console.log(`Library synced: ${combined.length} tracks`);
         return combined;
       });
     };
@@ -288,7 +304,11 @@ export default function Home() {
         setLibrary(prev => {
           // Prevent exact duplicates by ID
           if (prev.find(t => t.id === newTrack.id)) return prev;
-          return [newTrack, ...prev];
+          const updated = [newTrack, ...prev];
+          // Save to local storage immediately
+          const toSave = updated.map(t => ({ id: t.id, name: t.name, filePath: t.filePath }));
+          localStorage.setItem("eq-lab-library", JSON.stringify(toSave));
+          return updated;
         });
         setCurrentTrack(curr => curr || newTrack);
       }
