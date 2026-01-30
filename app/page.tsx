@@ -66,6 +66,7 @@ export default function Home() {
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<string>("");
   const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(false);
 
   const requestRef = useRef<number | null>(null);
 
@@ -334,10 +335,15 @@ export default function Home() {
       stop();
       setIsPlaying(false);
     } else if (currentTrack) {
-      const buffer = await loadTrackBuffer(currentTrack);
-      if (buffer) {
-        playBuffer(buffer, progress, volume, eqGains, reverbDry, reverbWet);
-        setIsPlaying(true);
+      if (!currentTrack.buffer) setIsBuffering(true);
+      try {
+        const buffer = await loadTrackBuffer(currentTrack);
+        if (buffer) {
+          playBuffer(buffer, progress, volume, eqGains, reverbDry, reverbWet);
+          setIsPlaying(true);
+        }
+      } finally {
+        setIsBuffering(false);
       }
     }
   };
@@ -555,7 +561,9 @@ export default function Home() {
       </div>
 
       <footer className="player">
-        <button onClick={togglePlay} className="p-btn">{isPlaying ? "Ⅱ" : "▶"}</button>
+        <button onClick={togglePlay} className={`p-btn ${isBuffering ? "buffering" : ""}`} disabled={isBuffering}>
+          {isBuffering ? <span className="loader-s"></span> : (isPlaying ? "Ⅱ" : "▶")}
+        </button>
         <div className="p-info">
           <div className="p-meta"><b>{currentTrack?.name || "Ready"}</b> <span>{formatTime(progress)} / {formatTime(duration)}</span></div>
           <input
@@ -600,7 +608,11 @@ export default function Home() {
         .library-section { display: flex; flex-direction: column; height: 100%; overflow: hidden; border-right: 1px solid var(--border); position: relative; transition: 0.2s; }
         .library-section.drag-active { background: rgba(0, 229, 255, 0.05); outline: 2px dashed var(--accent); outline-offset: -10px; }
         .section-head-row { padding: 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); }
-        .add-icon-btn { width: 28px; height: 28px; background: var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text); font-size: 1.2rem; transition: 0.2s; }
+        .p-btn { width: 45px; height: 45px; border-radius: 50%; background: var(--accent); border: none; font-size: 1rem; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #000; position: relative; }
+        .p-btn.buffering { background: var(--border); color: var(--text-m); cursor: wait; }
+        .loader-s { width: 20px; height: 20px; border: 2px solid var(--text-m); border-bottom-color: transparent; border-radius: 50%; display: inline-block; animation: rotation 1s linear infinite; }
+        @keyframes rotation { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .p-info { flex: 1; display: flex; flex-direction: column; gap: 5px; }
         .add-icon-btn:hover { background: var(--accent); color: #000; }
         .drag-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; font-size: 0.9rem; color: var(--accent); pointer-events: none; z-index: 10; font-weight: bold; }
         .track-list { flex: 1; overflow-y: auto; padding: 10px; }
