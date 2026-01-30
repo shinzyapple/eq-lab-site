@@ -70,6 +70,7 @@ export default function Home() {
   const [isBuffering, setIsBuffering] = useState(false);
 
   const requestRef = useRef<number | null>(null);
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Helper to load buffer if missing
   const loadTrackBuffer = async (track: Track): Promise<AudioBuffer | null> => {
@@ -269,10 +270,23 @@ export default function Home() {
           volume: p.volume
         }));
         setPresets(prev => {
-          // Avoid duplicates
-          const existingIds = new Set(prev.map(p => p.id));
-          const newPresets = formatted.filter((p: any) => !existingIds.has(p.id));
-          return [...defaultPresets, ...newPresets];
+          // Merge logic: Update existing presets if data matches, add new ones
+          const defaultIds = new Set(defaultPresets.map(p => p.id));
+          const customInPrev = prev.filter(p => !defaultIds.has(p.id));
+
+          // Re-create the list starting with defaults
+          const merged = [...defaultPresets];
+
+          formatted.forEach((cloudP: Preset) => {
+            const indexInMerged = merged.findIndex(p => p.id === cloudP.id);
+            if (indexInMerged > -1) {
+              merged[indexInMerged] = cloudP;
+            } else {
+              merged.push(cloudP);
+            }
+          });
+
+          return merged;
         });
       }
     };
@@ -441,13 +455,12 @@ export default function Home() {
     setReverbDry(p.reverbDry); setReverbWet(p.reverbWet); setVolume(p.volume);
   };
 
-  const updateActivePreset = async (updatedFields: Partial<Preset>) => {
+  const updateActivePreset = (updatedFields: Partial<Preset>) => {
     if (!activePresetId) return;
 
-    // Default presets (flat, concert-hall) are read-only in this logic 
-    // or we can allow session-based local override. Let's filter custom ones.
     const isCustom = !['flat', 'concert-hall'].includes(activePresetId);
 
+    // 1. Update local state immediately
     setPresets(prev => prev.map(p => {
       if (p.id === activePresetId) {
         return { ...p, ...updatedFields };
@@ -455,15 +468,21 @@ export default function Home() {
       return p;
     }));
 
+    // 2. Debounce server update
     const userEmail = session?.user?.email;
     if (isCustom && userEmail) {
-      const payload: any = {};
-      if (updatedFields.eqGains) payload.eq_gains = updatedFields.eqGains;
-      if (updatedFields.reverbDry !== undefined) payload.reverb_dry = updatedFields.reverbDry;
-      if (updatedFields.reverbWet !== undefined) payload.reverb_wet = updatedFields.reverbWet;
-      if (updatedFields.volume !== undefined) payload.volume = updatedFields.volume;
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = setTimeout(async () => {
+        const payload: any = {};
+        if (updatedFields.eqGains) payload.eq_gains = updatedFields.eqGains;
+        if (updatedFields.reverbDry !== undefined) payload.reverb_dry = updatedFields.reverbDry;
+        if (updatedFields.reverbWet !== undefined) payload.reverb_wet = updatedFields.reverbWet;
+        if (updatedFields.volume !== undefined) payload.volume = updatedFields.volume;
 
-      await supabase.from("presets").update(payload).eq("id", activePresetId);
+        console.log("Syncing preset to server...", payload);
+        const { error } = await supabase.from("presets").update(payload).eq("id", activePresetId);
+        if (error) console.error("Server sync failed:", error);
+      }, 1000);
     }
   };
 
@@ -698,24 +717,24 @@ export default function Home() {
       </nav>
 
       <style jsx>{`
-        .main-layout { --accent: #00e5ff; --bg: #000; --p-bg: #0c0c0e; --text: #fff; --text-m: #888; --border: #222; --hover: #161618; --player: rgba(10,10,12,0.85); height: 100dvh; display: flex; flex-direction: column; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; transition: 0.3s; }
-        .main-layout.light-theme { --bg: #f5f5f7; --p-bg: #fff; --text: #1d1d1f; --text-m: #86868b; --border: #e2e2e7; --hover: #f5f5f7; --player: rgba(255,255,255,0.85); }
+        .main-layout { --accent: #a855f7; --bg: #000; --p-bg: #0c0c0e; --text: #fff; --text-m: #888; --border: #222; --hover: #161618; --player: rgba(10,10,12,0.85); height: 100dvh; display: flex; flex-direction: column; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; transition: 0.3s; }
+        .main-layout.light-theme { --bg: #f9f7ff; --p-bg: #fff; --text: #1d1d1f; --text-m: #86868b; --border: #ede9fe; --hover: #f5f0ff; --player: rgba(255,255,255,0.85); }
         .header { padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); background: var(--p-bg); flex-shrink: 0; }
         .header-left { display: flex; align-items: center; gap: 15px; }
         .logo { font-size: 1.1rem; font-weight: 900; color: var(--accent); white-space: nowrap; }
         .last-updated { font-size: 0.6rem; color: var(--text-m); font-weight: normal; margin-left: 10px; opacity: 0.7; }
         .theme-btn { background: none; border: none; font-size: 1.2rem; cursor: pointer; }
         .btn-s { background: var(--border); border: none; color: var(--text); padding: 6px 12px; border-radius: 4px; font-size: 0.8rem; cursor: pointer; }
-        .btn-xs { background: var(--accent); color: #000; border: none; padding: 4px 10px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; cursor: pointer; }
-        .btn-primary { width: 100%; background: var(--accent); color: #000; border: none; padding: 14px; border-radius: 8px; font-weight: bold; margin-top: 15px; cursor: pointer; }
+        .btn-xs { background: var(--accent); color: #fff; border: none; padding: 4px 10px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; cursor: pointer; }
+        .btn-primary { width: 100%; background: var(--accent); color: #fff; border: none; padding: 14px; border-radius: 8px; font-weight: bold; margin-top: 15px; cursor: pointer; }
         .content-grid { flex: 1; display: grid; grid-template-columns: 320px 1fr 300px; overflow: hidden; }
         .panel { display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--p-bg); overflow: hidden; }
         .panel-head { padding: 20px; display: flex; justify-content: space-between; align-items: center; }
         h2 { font-size: 0.7rem; color: var(--text-m); letter-spacing: 1px; margin: 0; }
         .library-section { display: flex; flex-direction: column; height: 100%; overflow: hidden; border-right: 1px solid var(--border); position: relative; transition: 0.2s; }
-        .library-section.drag-active { background: rgba(0, 229, 255, 0.05); outline: 2px dashed var(--accent); outline-offset: -10px; }
+        .library-section.drag-active { background: rgba(168, 85, 247, 0.05); outline: 2px dashed var(--accent); outline-offset: -10px; }
         .section-head-row { padding: 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); }
-        .p-btn { width: 45px; height: 45px; border-radius: 50%; background: var(--accent); border: none; font-size: 1rem; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #000; position: relative; }
+        .p-btn { width: 45px; height: 45px; border-radius: 50%; background: var(--accent); border: none; font-size: 1rem; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #fff; position: relative; }
         .p-btn.buffering { background: var(--border); color: var(--text-m); cursor: wait; }
         .loader-s { width: 20px; height: 20px; border: 2px solid var(--text-m); border-bottom-color: transparent; border-radius: 50%; display: inline-block; animation: rotation 1s linear infinite; }
         @keyframes rotation { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -751,8 +770,8 @@ export default function Home() {
         .pre-box { padding: 0 20px 20px; flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
         .preset-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 10px 0 160px; }
         .preset-item { padding: 12px 16px; background: var(--hover); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.85rem; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: 0.2s; }
-        .preset-item:hover { border-color: var(--accent); background: rgba(0,229,255,0.05); }
-        .preset-item.active-preset { border-color: var(--accent); background: rgba(0,229,255,0.15); box-shadow: 0 0 10px rgba(0,229,255,0.2); }
+        .preset-item:hover { border-color: var(--accent); background: rgba(168, 85, 247, 0.05); }
+        .preset-item.active-preset { border-color: var(--accent); background: rgba(168, 85, 247, 0.15); box-shadow: 0 0 10px rgba(168, 85, 247, 0.2); }
         .active-preset .preset-name { color: var(--accent); font-weight: bold; }
         .p-del-btn { background: none; border: none; color: var(--text-m); font-size: 1.2rem; cursor: pointer; padding: 0 5px; }
         .p-del-btn:hover { color: #f00; }
