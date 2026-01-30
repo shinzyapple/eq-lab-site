@@ -300,7 +300,12 @@ export function playStream(
   }
 
   mediaElement.src = url;
-  mediaElement.currentTime = startAt;
+  mediaElement.onloadedmetadata = () => {
+    console.log("Stream metadata loaded. Duration:", mediaElement?.duration);
+    if (mediaElement) mediaElement.currentTime = startAt;
+    updateMediaPositionState();
+  };
+
   mediaElement.play().catch(e => console.error("Stream play failed:", e));
 
   if (proxyAudio) {
@@ -313,6 +318,7 @@ export function playStream(
   if ('mediaSession' in navigator) {
     navigator.mediaSession.playbackState = 'playing';
     updateMediaMetadata(lastTitle || 'Streaming Track');
+    // We update position state again here just in case, but loadedmetadata is more reliable for duration
     updateMediaPositionState();
   }
 
@@ -354,6 +360,16 @@ export function updateMediaMetadata(title: string, artist: string = 'EQ LAB', al
       if (details.seekTime !== undefined && onSeekTo) {
         onSeekTo(details.seekTime);
       }
+    });
+    navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+      const skipTime = details.seekOffset || 10;
+      console.log("MediaSession: seekbackward", skipTime);
+      if (onSeekTo) onSeekTo(Math.max(0, getCurrentTime() - skipTime));
+    });
+    navigator.mediaSession.setActionHandler('seekforward', (details) => {
+      const skipTime = details.seekOffset || 10;
+      console.log("MediaSession: seekforward", skipTime);
+      if (onSeekTo) onSeekTo(Math.min(getDuration(), getCurrentTime() + skipTime));
     });
   }
 }

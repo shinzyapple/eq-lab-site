@@ -889,7 +889,9 @@ export default function Home() {
         .fx-box { display: flex; flex-direction: column; gap: 8px; }
         .fx-box label { font-size: 0.65rem; color: var(--text-m); font-weight: bold; }
         .f-r { display: flex; flex-direction: column; gap: 5px; }
-        input[type="range"] { -webkit-appearance: none; height: 3px; background: var(--border); border-radius: 2px; }
+        input[type="range"] { -webkit-appearance: none; height: 3px; background: var(--border); border-radius: 2px; outline: none; }
+        .p-bar { -webkit-appearance: none; width: 100%; height: 6px; background: var(--border); border-radius: 3px; margin: 10px 0; cursor: pointer; }
+        .p-bar::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; background: var(--accent); border-radius: 50%; border: 3px solid #fff; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
         .fx-range { -webkit-appearance: none; width: 100%; height: 6px; background: var(--border); border-radius: 3px; outline: none; margin: 10px 0; }
         .fx-range::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; background: var(--accent); border-radius: 50%; border: 3px solid #fff; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.3); }
         .pre-box { padding: 0 20px 20px; flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
@@ -924,8 +926,8 @@ export default function Home() {
           .show-mobile { display: flex; flex-direction: column; width: 100%; }
           .player { bottom: 75px; left: 0; right: 0; border-radius: 24px 24px 0 0; border: none; border-top: 1px solid var(--border); padding: 15px 20px 20px; box-shadow: 0 -10px 30px rgba(0,0,0,0.5); }
           .p-btn { width: 45px; height: 45px; font-size: 1.1rem; }
-          .p-bar { height: 5px; }
-          .p-bar::-webkit-slider-thumb { width: 14px; height: 14px; }
+          .p-bar { height: 8px; margin: 15px 0; }
+          .p-bar::-webkit-slider-thumb { width: 24px; height: 24px; }
           .mobile-nav { display: flex; position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: var(--p-bg); border-top: 1px solid var(--border); z-index: 2001; padding-bottom: env(safe-area-inset-bottom); }
           .nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; background: none; border: none; color: var(--text-m); gap: 4px; transition: 0.2s; }
           .nav-item.active { color: var(--accent); }
