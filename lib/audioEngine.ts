@@ -27,6 +27,9 @@ let currentBuffer: AudioBuffer | null = null;
 let startTime = 0;
 let offsetTime = 0;
 let isPlayingInternal = false;
+let lastTitle = 'Unknown Track';
+let lastArtist = 'EQ LAB';
+let lastAlbum = 'Audio Library';
 
 function createImpulseResponse(context: AudioContext, duration: number, decay: number) {
   const sampleRate = context.sampleRate;
@@ -54,12 +57,11 @@ export async function initContext() {
     proxyAudio = new Audio();
     proxyAudio.srcObject = streamDest.stream;
     proxyAudio.setAttribute("playsinline", "true");
-    // Mute proxy audio element but keep stream active. 
-    // On desktop we use main destination. On iOS this keeps background session alive.
-    proxyAudio.muted = true;
+    // iOS Control Center requirement: Must be unmuted to show up in lock screen/controls
+    proxyAudio.muted = false;
 
-    // Prime the proxy audio immediately
-    proxyAudio.play().catch(e => console.log("Proxy audio priming failed:", e));
+    // Prime the proxy audio immediately with a play attempt
+    proxyAudio.play().catch(e => console.log("Initial proxy audio priming (expected to fail if no user act):", e));
 
     // Resume context on first user interaction if it starts suspended
     if (audioContext.state === "suspended") {
@@ -204,12 +206,14 @@ export function playBuffer(
   reverbWetGain.connect(mainGainNode);
 
   // PIPE OUTPUT
-  // Connect to main destination for standard playback (PC/Mac)
-  mainGainNode.connect(audioContext.destination);
-
-  // Also connect to streamDest for proxyAudio (iPhone background)
+  // IMPORTANT for iOS Control Center: 
+  // We pipe everything through streamDest -> proxyAudio (unmuted). 
+  // We do NOT connect to audioContext.destination directly to avoid double audio.
   if (streamDest) {
     mainGainNode.connect(streamDest);
+  } else {
+    // Fallback for environments without stream destination
+    mainGainNode.connect(audioContext.destination);
   }
 
   if (proxyAudio) {
@@ -221,7 +225,11 @@ export function playBuffer(
 
   if ('mediaSession' in navigator) {
     navigator.mediaSession.playbackState = 'playing';
-    updateMediaPositionState();
+    // Refresh metadata and position whenever playback starts
+    if (currentBuffer) {
+      updateMediaMetadata(lastTitle || 'Unknown Track');
+      updateMediaPositionState();
+    }
   }
 
   source.onended = () => {
@@ -238,6 +246,9 @@ export function playBuffer(
 }
 
 export function updateMediaMetadata(title: string, artist: string = 'EQ LAB', album: string = 'Audio Library', artworkUrl?: string) {
+  lastTitle = title;
+  lastArtist = artist;
+  lastAlbum = album;
   if ('mediaSession' in navigator) {
     navigator.mediaSession.metadata = new MediaMetadata({
       title: title,
