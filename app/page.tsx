@@ -240,10 +240,13 @@ export default function Home() {
     const playing = getIsPlaying();
     setIsPlaying(playing);
     if (playing && !isDragging) {
-      setProgress(getCurrentTime());
+      const currentTime = getCurrentTime();
+      setProgress(currentTime);
       setDuration(getDuration());
-      // Sync control center progress
-      updateMediaPositionState();
+      // Sync control center progress with OS
+      if ('mediaSession' in navigator) {
+        updateMediaPositionState();
+      }
     }
     requestRef.current = requestAnimationFrame(updateProgress);
   };
@@ -346,6 +349,8 @@ export default function Home() {
       const buffer = await loadTrackBuffer(currentTrack);
       if (buffer) playBuffer(buffer, time, volume, eqGains, reverbDry, reverbWet);
     }
+    // Immediate sync to lock screen after manual seek
+    updateMediaPositionState();
   };
 
   const deleteTrack = async (id: string, e: React.MouseEvent) => {
@@ -540,7 +545,7 @@ export default function Home() {
         </button>
         <button onClick={() => setActiveTab("eq")} className={`nav-item ${activeTab === "eq" ? "active" : ""}`}>
           <span className="nav-icon">🎚️</span>
-          <span className="nav-label">EQ設定</span>
+          <span className="nav-label">EQプリセット</span>
         </button>
         <button onClick={() => setActiveTab("matching")} className={`nav-item ${activeTab === "matching" ? "active" : ""}`}>
           <span className="nav-icon">🤖</span>
@@ -610,10 +615,14 @@ export default function Home() {
           .mobile-only { display: block; }
           .content-grid { grid-template-columns: 1fr; }
           .left-sidebar, .panel { height: calc(100dvh - 200px); overflow-y: auto; padding-bottom: 120px; }
+          .left-sidebar.show-mobile { width: 100%; border-right: none; }
           .hide-mobile { display: none; }
-          .show-mobile { display: flex; }
-          .player { bottom: 70px; left: 0; right: 0; border-radius: 20px 20px 0 0; border: none; border-top: 1px solid var(--border); padding-bottom: 15px; box-shadow: none; }
-          .mobile-nav { display: flex; position: fixed; bottom: 0; left: 0; right: 0; height: 70px; background: var(--p-bg); border-top: 1px solid var(--border); z-index: 1001; }
+          .show-mobile { display: flex; flex-direction: column; width: 100%; }
+          .player { bottom: 70px; left: 0; right: 0; border-radius: 24px 24px 0 0; border: none; border-top: 1px solid var(--border); padding: 20px; padding-bottom: 25px; box-shadow: 0 -10px 30px rgba(0,0,0,0.5); }
+          .p-btn { width: 50px; height: 50px; font-size: 1.2rem; }
+          .p-bar { height: 6px; }
+          .p-bar::-webkit-slider-thumb { width: 16px; height: 16px; }
+          .mobile-nav { display: flex; position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: var(--p-bg); border-top: 1px solid var(--border); z-index: 1001; padding-bottom: constant(safe-area-inset-bottom); padding-bottom: env(safe-area-inset-bottom); }
           .nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; background: none; border: none; color: var(--text-m); gap: 4px; transition: 0.2s; }
           .nav-item.active { color: var(--accent); }
           .nav-icon { font-size: 1.2rem; }
