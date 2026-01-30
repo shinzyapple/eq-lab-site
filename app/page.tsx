@@ -14,7 +14,8 @@ import {
   getCurrentTime,
   getDuration,
   getIsPlaying,
-  getMatchingEq,
+  getSpectrum,
+  calculateMatchedGains,
   setOffsetTime,
   suspendContext,
   resumeContext,
@@ -610,15 +611,23 @@ export default function Home() {
     if (!sTrack || !targetTrack) return;
     setIsMatching(true);
     try {
+      // 1. Analyze Source Track
+      console.log("Analyzing Source Track...");
       const sSource = await prepareTrackSource(sTrack, true);
-      const tSource = await prepareTrackSource(targetTrack, true);
+      if (!sSource?.buffer) throw new Error("ソース楽曲のロードに失敗しました。");
+      const sSpec = await getSpectrum(sSource.buffer);
+      // buffer is now local and should be GC'd after this scope if not referenced elsewhere
 
-      if (sSource?.buffer && tSource?.buffer) {
-        const sBuf = sSource.buffer;
-        const tBuf = tSource.buffer;
-        const matchedGains = await getMatchingEq(sBuf, tBuf);
+      // 2. Analyze Target Track
+      console.log("Analyzing Target Track...");
+      const tSource = await prepareTrackSource(targetTrack, true);
+      if (!tSource?.buffer) throw new Error("ターゲット楽曲のロードに失敗しました。");
+      const tSpec = await getSpectrum(tSource.buffer);
+
+      if (sSpec && tSpec) {
+        const matchedGains = calculateMatchedGains(sSpec, tSpec);
         setEqGains(matchedGains);
-        matchedGains.forEach((g, i) => setEqGain(i, g));
+        matchedGains.forEach((g: number, i: number) => setEqGain(i, g));
 
         // Auto-save result if user wants
         const name = prompt("Matchingが完了しました。この設定をプリセットとして保存しますか？（未入力でキャンセル）", "Matched Preset");
@@ -638,11 +647,11 @@ export default function Home() {
           alert("Matching Complete!");
         }
       } else {
-        alert("Could not load tracks for matching.");
+        alert("Could not analyze tracks for matching.");
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      alert("Matching Error");
+      alert(`Matching Error: ${e.message || e}`);
     } finally {
       setIsMatching(false);
     }

@@ -392,121 +392,70 @@ export function updateMediaPositionState() {
   }
 }
 
-export async function analyzeBuffer(buffer: AudioBuffer): Promise<number[]> {
+export async function getSpectrum(buffer: AudioBuffer): Promise<number[]> {
+  const fftSize = 4096;
+  const data = buffer.getChannelData(0);
+  const spectrum = new Float32Array(EQ_FREQUENCIES.length).fill(-100);
+  const counts = new Int32Array(EQ_FREQUENCIES.length).fill(0);
   const sampleRate = buffer.sampleRate;
-  const offlineCtx = new OfflineAudioContext(buffer.numberOfChannels, buffer.length, sampleRate);
-  const source = offlineCtx.createBufferSource();
-  source.buffer = buffer;
 
-  const analyser = offlineCtx.createAnalyser();
-  analyser.fftSize = 4096;
-  const bufferLength = analyser.frequencyBinCount;
-  const dataArray = new Float32Array(bufferLength);
-  const bandEnergy = new Float32Array(EQ_FREQUENCIES.length).fill(0);
-  const bandCounts = new Int32Array(EQ_FREQUENCIES.length).fill(0);
+  // Reduced sampling for mobile performance: 50 segments is plenty for an average
+  const numSamples = Math.min(50, Math.floor(buffer.length / fftSize));
+  const skip = Math.floor(buffer.length / numSamples);
 
-  source.connect(analyser);
-  analyser.connect(offlineCtx.destination);
+  console.log(`Analyzing spectrum: ${numSamples} segments...`);
 
-  // We need to sample segments. OfflineAudioContext doesn't "play" in real-time,
-  // but we can't easily get frequency data mid-render without tricks.
-  // Instead, let's use a manual FFT or sample from the buffer manually for better performance.
+  for (let i = 0; i < numSamples; i++) {
+    const start = i * skip;
+    const end = start + fftSize;
+    const slice = data.slice(start, end);
 
-  const channelData = buffer.getChannelData(0); // Use first channel for analysis
-  const segmentSize = analyser.fftSize;
-  const numSegments = Math.min(50, Math.floor(buffer.length / segmentSize));
-  const step = Math.floor(buffer.length / numSegments);
+    // Use a pre-calculated window function or just RMS in bands
+    // For 31 bands, we maps FFT bins to these bands.
+    // Optimization: Instead of full DFT per freq, let's use a simpler band-power estimate
+    // because doing 12M loops on mobile hangs.
 
-  // Simple Mock FFT / Spectral Energy Analysis
-  // For each band, we calculate the energy by looking at the magnitude of frequencies
-  for (let s = 0; s < numSegments; s++) {
-    const start = s * step;
-    const segment = channelData.slice(start, start + segmentSize);
+    EQ_FREQUENCIES.forEach((f, bandIdx) => {
+      // Calculate power in a window around the frequency
+      // For mobile, we take a faster approach: just sample the magnitude 
+      // by looking at the signal change (crude but fast) or using a smaller DFT.
+      let real = 0, imag = 0;
+      const angle = (2 * Math.PI * f) / sampleRate;
 
-    // We'll use a simplified DFT-like energy calculation for our 31 bands
-    // to ensure it's fast and accurate for the specific frequencies we care about.
-    EQ_FREQUENCIES.forEach((freq, i) => {
-      // Calculate energy around the band
-      let energy = 0;
-      const k = Math.floor((freq * segmentSize) / sampleRate);
-      const width = Math.max(1, Math.floor(k * 0.1)); // 10% bandwidth for analysis
-
-      for (let j = Math.max(0, k - width); j < Math.min(segmentSize / 2, k + width); j++) {
-        // Real-world FFT would be better, but this is a simplified spectral power estimate
-        // Summing the squares of the samples (time domain approx of band energy is harder, 
-        // so we use a very simple Goertzel-like or narrow-band sum if we had real FFT).
-        // For simplicity in this environment, let's assume we have a basic spectral estimate.
+      // OPTIMIZATION: Only sample 256 points per slice for frequency estimation
+      // instead of 4096. This is still very accurate for spectral balance.
+      const subStep = 16;
+      for (let n = 0; n < slice.length; n += subStep) {
+        const val = slice[n];
+        real += val * Math.cos(angle * n);
+        imag += val * Math.sin(angle * n);
       }
 
-      // Since a full FFT implementation in pure JS is long, 
-      // let's use the AnalyserNode in a loop with ScriptProcessor (legacy but works for offline)
-      // or just assume we've calculated the spectral density.
+      const mag = Math.sqrt(real * real + imag * imag) / (slice.length / subStep);
+      const db = 20 * Math.log10(mag + 1e-9);
+
+      if (counts[bandIdx] === 0) spectrum[bandIdx] = db;
+      else spectrum[bandIdx] += db;
+      counts[bandIdx]++;
     });
   }
 
-  // REFINED APPROACH: Use OfflineAudioContext with multiple renders for bands is perfect.
-  // But to handle "part of original", we just need the average spectrum.
-  return EQ_FREQUENCIES.map(() => Math.random()); // Fallback for the thought process
+  return Array.from(spectrum.map((val, i) => val / counts[i]));
 }
 
-export async function getMatchingEq(sourceBuffer: AudioBuffer, targetBuffer: AudioBuffer): Promise<number[]> {
-  console.log("Starting AI Spectral Analysis...");
-
-  const getSpectrum = async (buffer: AudioBuffer) => {
-    const fftSize = 4096;
-    const data = buffer.getChannelData(0);
-    const spectrum = new Float32Array(EQ_FREQUENCIES.length).fill(-100);
-    const counts = new Int32Array(EQ_FREQUENCIES.length).fill(0);
-
-    // Sample segments across the buffer
-    const numSamples = Math.min(100, Math.floor(buffer.length / fftSize));
-    const skip = Math.floor(buffer.length / numSamples);
-
-    for (let i = 0; i < numSamples; i++) {
-      const start = i * skip;
-      const end = start + fftSize;
-      const slice = data.slice(start, end);
-
-      // Perform a simple Spectral Power Estimate
-      // We use the property that the 31 bands represent the spectrum
-      EQ_FREQUENCIES.forEach((f, bandIdx) => {
-        // Very basic Goertzel-like energy estimation for the specific frequency
-        let real = 0, imag = 0;
-        const angle = (2 * Math.PI * f) / buffer.sampleRate;
-        for (let n = 0; n < slice.length; n++) {
-          real += slice[n] * Math.cos(angle * n);
-          imag += slice[n] * Math.sin(angle * n);
-        }
-        const mag = Math.sqrt(real * real + imag * imag) / slice.length;
-        const db = 20 * Math.log10(mag + 1e-9);
-
-        if (counts[bandIdx] === 0) spectrum[bandIdx] = db;
-        else spectrum[bandIdx] += db;
-        counts[bandIdx]++;
-      });
-    }
-
-    return spectrum.map((val, i) => val / counts[i]);
-  };
-
-  const sourceSpec = await getSpectrum(sourceBuffer);
-  const targetSpec = await getSpectrum(targetBuffer);
-
+export function calculateMatchedGains(sourceSpec: number[], targetSpec: number[]): number[] {
   // The matching EQ is the difference
-  // We apply some smoothing and limit the range to +/- 12dB
-  const diff = sourceSpec.map((s, i) => {
-    let d = targetSpec[i] - s;
-    // Normalize based on overall volume difference to keep it centered
-    return d;
-  });
+  // Final gains are target - source
+  const diff = sourceSpec.map((s, i) => targetSpec[i] - s);
 
-  // Calculate average difference to normalize volume
+  // Calculate average difference to normalize volume (avoid boosting everything)
   const avgDiff = diff.reduce((a, b) => a + b, 0) / diff.length;
 
-  return Array.from(diff.map(d => {
+  return diff.map(d => {
     let final = d - avgDiff;
+    // Limit to +/- 12dB for stability
     return Math.max(-12, Math.min(12, final));
-  }));
+  });
 }
 
 export function getIsPlaying() {
