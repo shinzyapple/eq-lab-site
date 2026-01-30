@@ -57,6 +57,7 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
 
   const [presets, setPresets] = useState<Preset[]>(defaultPresets);
+  const [activePresetId, setActivePresetId] = useState<string | null>(null);
   const [isMatching, setIsMatching] = useState(false);
   const [sourceTrack, setSourceTrack] = useState<Track | null>(null);
   const [targetTrack, setTargetTrack] = useState<Track | null>(null);
@@ -394,15 +395,43 @@ export default function Home() {
     } catch (e) { alert("Delete failed"); }
   };
 
-  const handleEqChange = (index: number, value: number) => {
-    const next = [...eqGains]; next[index] = value;
-    setEqGains(next); setEqGain(index, value);
-  };
-
   const applyPreset = (p: Preset) => {
+    setActivePresetId(p.id);
     setEqGains([...p.eqGains]); setRevDry(p.reverbDry); setRevWet(p.reverbWet); setGlobalVolume(p.volume);
     p.eqGains.forEach((g, i) => setEqGain(i, g));
     setReverbDry(p.reverbDry); setReverbWet(p.reverbWet); setVolume(p.volume);
+  };
+
+  const updateActivePreset = async (updatedFields: Partial<Preset>) => {
+    if (!activePresetId) return;
+
+    // Default presets (flat, concert-hall) are read-only in this logic 
+    // or we can allow session-based local override. Let's filter custom ones.
+    const isCustom = !['flat', 'concert-hall'].includes(activePresetId);
+
+    setPresets(prev => prev.map(p => {
+      if (p.id === activePresetId) {
+        return { ...p, ...updatedFields };
+      }
+      return p;
+    }));
+
+    const userEmail = session?.user?.email;
+    if (isCustom && userEmail) {
+      const payload: any = {};
+      if (updatedFields.eqGains) payload.eq_gains = updatedFields.eqGains;
+      if (updatedFields.reverbDry !== undefined) payload.reverb_dry = updatedFields.reverbDry;
+      if (updatedFields.reverbWet !== undefined) payload.reverb_wet = updatedFields.reverbWet;
+      if (updatedFields.volume !== undefined) payload.volume = updatedFields.volume;
+
+      await supabase.from("presets").update(payload).eq("id", activePresetId);
+    }
+  };
+
+  const handleEqChange = (index: number, value: number) => {
+    const next = [...eqGains]; next[index] = value;
+    setEqGains(next); setEqGain(index, value);
+    updateActivePreset({ eqGains: next });
   };
 
   const savePreset = async () => {
@@ -550,23 +579,35 @@ export default function Home() {
           <div className="fx-grid">
             <div className="fx-box">
               <label>Reverb Dry: {Math.round(reverbDry * 100)}%</label>
-              <input type="range" min="0" max="1" step="0.01" value={reverbDry} onChange={e => { const v = parseFloat(e.target.value); setRevDry(v); setReverbDry(v); }} className="fx-range" />
+              <input type="range" min="0" max="1" step="0.01" value={reverbDry} onChange={e => {
+                const v = parseFloat(e.target.value);
+                setRevDry(v); setReverbDry(v);
+                updateActivePreset({ reverbDry: v });
+              }} className="fx-range" />
             </div>
             <div className="fx-box">
               <label>Reverb Wet: {Math.round(reverbWet * 100)}%</label>
-              <input type="range" min="0" max="1" step="0.01" value={reverbWet} onChange={e => { const v = parseFloat(e.target.value); setRevWet(v); setReverbWet(v); }} className="fx-range" />
+              <input type="range" min="0" max="1" step="0.01" value={reverbWet} onChange={e => {
+                const v = parseFloat(e.target.value);
+                setRevWet(v); setReverbWet(v);
+                updateActivePreset({ reverbWet: v });
+              }} className="fx-range" />
             </div>
             <div className="fx-box full-width">
               <label>Output Gain: {Math.round(volume * 100)}%</label>
-              <input type="range" min="0" max="1.5" step="0.01" value={volume} onChange={e => { const v = parseFloat(e.target.value); setGlobalVolume(v); setVolume(v); }} className="fx-range wide" />
+              <input type="range" min="0" max="1.5" step="0.01" value={volume} onChange={e => {
+                const v = parseFloat(e.target.value);
+                setGlobalVolume(v); setVolume(v);
+                updateActivePreset({ volume: v });
+              }} className="fx-range wide" />
             </div>
           </div>
           <div className="pre-box">
             <label>PRESETS LIST</label>
             <div className="preset-list">
               {presets.map(p => (
-                <div key={p.id} onClick={() => applyPreset(p)} className="preset-item">
-                  <span className="preset-name">{p.name}</span>
+                <div key={p.id} onClick={() => applyPreset(p)} className={`preset-item ${activePresetId === p.id ? "active-preset" : ""}`}>
+                  <span className="preset-name">{p.name} {activePresetId === p.id && <small>(選択中)</small>}</span>
                   {(p.id !== 'flat' && p.id !== 'concert-hall') && (
                     <button onClick={e => { deletePreset(p.id, e); }} className="p-del-btn">×</button>
                   )}
@@ -672,6 +713,8 @@ export default function Home() {
         .preset-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 10px 0 160px; }
         .preset-item { padding: 12px 16px; background: var(--hover); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.85rem; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: 0.2s; }
         .preset-item:hover { border-color: var(--accent); background: rgba(0,229,255,0.05); }
+        .preset-item.active-preset { border-color: var(--accent); background: rgba(0,229,255,0.15); box-shadow: 0 0 10px rgba(0,229,255,0.2); }
+        .active-preset .preset-name { color: var(--accent); font-weight: bold; }
         .p-del-btn { background: none; border: none; color: var(--text-m); font-size: 1.2rem; cursor: pointer; padding: 0 5px; }
         .p-del-btn:hover { color: #f00; }
         .m-panel { padding: 20px; }
