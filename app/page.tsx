@@ -83,8 +83,9 @@ export default function Home() {
         const { data, error } = await supabase.storage.from("eq-lab-tracks").download(track.filePath);
 
         if (error) {
-          console.error("Download Error:", error);
-          alert(`楽曲のダウンロードに失敗しました: ${error.message}`);
+          console.error("Download Error Details:", error);
+          const errorMsg = error.message || JSON.stringify(error, Object.getOwnPropertyNames(error));
+          alert(`楽曲のダウンロードに失敗しました: ${errorMsg}`);
           return null;
         }
 
@@ -189,24 +190,36 @@ export default function Home() {
       // 3. Atomically update the library
       setLibrary(prev => {
         const cloudIds = new Set(cloudTracks.map(t => t.id));
-        // Keep local tracks (including guest ones)
-        const locals = prev.filter(t => !cloudIds.has(t.id) && t.id !== "default");
+
+        // IMPORTANT: Filter out tracks that have a filePath (cloud tracks) but are NOT in current cloud results.
+        // This prevents deleted cloud tracks from lingering in localStorage and reappearing.
+        const locals = prev.filter(t => {
+          if (t.id === "default") return false;
+          // If it has a filePath, it MUST be in cloudTracks to stay
+          if (t.filePath) return cloudIds.has(t.id);
+          // Pure local (guest) tracks stay
+          return true;
+        });
+
         const combined = defaultTrack ? [defaultTrack, ...locals, ...cloudTracks] : [...locals, ...cloudTracks];
 
+        // Unique by ID
+        const unique = Array.from(new Map(combined.map(t => [t.id, t])).values());
+
         // Persist metadata to localStorage (filter out buffers)
-        const toSave = combined.map(t => ({ id: t.id, name: t.name, filePath: t.filePath }));
+        const toSave = unique.map(t => ({ id: t.id, name: t.name, filePath: t.filePath }));
         localStorage.setItem("eq-lab-library", JSON.stringify(toSave));
 
         // Restore last selected track if it exists in the new library
         const lastId = (window as any).__lastTrackId;
         if (lastId) {
-          const matched = combined.find(t => t.id === lastId);
+          const matched = unique.find(t => t.id === lastId);
           if (matched) setCurrentTrack(matched);
           delete (window as any).__lastTrackId;
         }
 
-        console.log(`Library synced: ${combined.length} tracks`);
-        return combined;
+        console.log(`Library synced: ${unique.length} tracks`);
+        return unique;
       });
     };
 
@@ -357,10 +370,11 @@ export default function Home() {
       }
 
       if (userEmail && mode === "library") {
-        // Sanitise filename: keep extension, but use timestamp + random for the key part to avoid "Invalid key" with Japanese/special chars
-        const ext = file.name.split('.').pop();
+        // Use raw email for folder (essential for RLS policies) but safe name for file
+        const ext = file.name.includes('.') ? file.name.split('.').pop() : 'bin';
         const safeName = `${Date.now()}-${Math.random().toString(36).substr(2, 5)}.${ext}`;
         filePath = `${userEmail}/${safeName}`;
+
         console.log(`Uploading to Supabase: ${filePath}`);
 
         const { error: uploadError } = await supabase.storage
@@ -369,7 +383,8 @@ export default function Home() {
 
         if (uploadError) {
           console.error("Cloud Storage Upload Error:", uploadError);
-          throw new Error(`Cloud storage upload failed: ${uploadError.message}`);
+          const errorMsg = uploadError.message || JSON.stringify(uploadError, Object.getOwnPropertyNames(uploadError));
+          throw new Error(`Storage upload failed: ${errorMsg}`);
         }
 
         const { data, error: dbError } = await supabase
@@ -379,7 +394,9 @@ export default function Home() {
 
         if (dbError) {
           console.error("Database Insert Error:", dbError);
-          throw new Error(`Database entry failed: ${dbError.message}`);
+          // Cleanup storage if DB failed
+          await supabase.storage.from("eq-lab-tracks").remove([filePath]);
+          throw new Error(`Database entry failed: ${dbError.message || JSON.stringify(dbError)}`);
         }
 
         if (data) trackId = data[0].id;
@@ -488,21 +505,32 @@ export default function Home() {
     e.stopPropagation();
     const track = library.find(t => t.id === id);
     if (!track || id === "default") return;
-    if (!confirm(`Delete "${track.name}"?`)) return;
+    if (!confirm(`楽曲 "${track.name}" を削除しますか？`)) return;
+
     try {
-      if (track.filePath) await supabase.storage.from("eq-lab-tracks").remove([track.filePath]);
-      if (track.filePath) { // Only delete from DB if it was a cloud track (has filePath)
-        await supabase.from("tracks").delete().eq("id", id);
+      if (track.filePath) {
+        console.log("Removing track from cloud storage/DB...");
+        const { error: sErr } = await supabase.storage.from("eq-lab-tracks").remove([track.filePath]);
+        if (sErr) console.warn("Storage removal warning:", sErr);
+
+        const { error: dbErr } = await supabase.from("tracks").delete().eq("id", id);
+        if (dbErr) throw new Error(`Database deletion failed: ${dbErr.message}`);
       }
+
       setLibrary(prev => {
         const filtered = prev.filter(t => t.id !== id);
-        // Persist to localStorage immediately
+        // Force immediate persistence to localStorage
         const toSave = filtered.map(t => ({ id: t.id, name: t.name, filePath: t.filePath }));
         localStorage.setItem("eq-lab-library", JSON.stringify(toSave));
         return filtered;
       });
+
       if (currentTrack?.id === id) setCurrentTrack(null);
-    } catch (e) { alert("Delete failed"); }
+      console.log("Track deleted successfully");
+    } catch (e: any) {
+      console.error("Delete failed:", e);
+      alert(`削除に失敗しました: ${e.message || JSON.stringify(e)}`);
+    }
   };
 
   const applyPreset = (p: Preset) => {
