@@ -432,8 +432,8 @@ export default function Home() {
       </header>
 
       <div className="content-grid">
-        {/* Left Sidebar: Library & Matching */}
-        <aside className="left-sidebar">
+        {/* Left Sidebar: Library */}
+        <aside className={`left-sidebar ${activeTab === "library" ? "show-mobile" : "hide-mobile"}`}>
           <section
             className={`glass-panel library-section ${isDraggingFile ? "drag-active" : ""}`}
             onDragOver={handleDragOver}
@@ -483,9 +483,9 @@ export default function Home() {
         </aside>
 
         {/* EQ Panel (Center) */}
-        <section className={`panel eq-panel ${activeTab === "eq" ? "show" : "hide"}`}>
+        <section className={`panel eq-panel ${activeTab === "eq" ? "show-mobile" : "hide-mobile"}`}>
           <div className="panel-head"><h2>EQ & EFFECTS</h2><button onClick={savePreset} className="btn-xs">Save</button></div>
-          <div className="eq-scroll">
+          <div className="eq-scroll pc-only">
             <div className="eq-grid">
               {EQ_FREQUENCIES.map((freq, i) => (
                 <div key={freq} className="eq-col">
@@ -495,6 +495,9 @@ export default function Home() {
                 </div>
               ))}
             </div>
+          </div>
+          <div className="mobile-eq-hint mobile-only">
+            <p>※ 31バンドEQの詳細調整はPC版のみ可能です。<br />スマホ版ではプリセットを選択してください。</p>
           </div>
           <div className="fx-grid">
             <div className="fx-box"><label>Reverb Dry/Wet</label><div className="f-r">
@@ -507,7 +510,7 @@ export default function Home() {
         </section>
 
         {/* Right Sidebar: Matching */}
-        <section className={`panel m-panel ${activeTab === "matching" ? "show" : "hide"}`}>
+        <section className={`panel m-panel ${activeTab === "matching" ? "show-mobile" : "hide-mobile"}`}>
           <h2>AI MATCHING</h2>
           <div className="m-field">
             <div className="m-row"><span>Src:</span> <b>{sourceTrack?.name || currentTrack?.name || "-"}</b> <label className="btn-s">File<input type="file" hidden onChange={e => handleFileUpload(e, "source")} /></label></div>
@@ -530,10 +533,25 @@ export default function Home() {
         </div>
       </footer>
 
+      <nav className="mobile-nav">
+        <button onClick={() => setActiveTab("library")} className={`nav-item ${activeTab === "library" ? "active" : ""}`}>
+          <span className="nav-icon">📚</span>
+          <span className="nav-label">ライブラリ</span>
+        </button>
+        <button onClick={() => setActiveTab("eq")} className={`nav-item ${activeTab === "eq" ? "active" : ""}`}>
+          <span className="nav-icon">🎚️</span>
+          <span className="nav-label">EQ設定</span>
+        </button>
+        <button onClick={() => setActiveTab("matching")} className={`nav-item ${activeTab === "matching" ? "active" : ""}`}>
+          <span className="nav-icon">🤖</span>
+          <span className="nav-label">AI比較</span>
+        </button>
+      </nav>
+
       <style jsx>{`
-        .main-layout { --accent: #00e5ff; --bg: #000; --p-bg: #0c0c0e; --text: #fff; --text-m: #888; --border: #222; --hover: #161618; --player: rgba(10,10,12,0.7); height: 100vh; display: flex; flex-direction: column; background: var(--bg); color: var(--text); font-family: sans-serif; overflow: hidden; transition: 0.3s; }
-        .main-layout.light-theme { --bg: #f5f5f7; --p-bg: #fff; --text: #1d1d1f; --text-m: #86868b; --border: #e2e2e7; --hover: #f5f5f7; --player: rgba(255,255,255,0.75); }
-        .header { padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); background: var(--p-bg); }
+        .main-layout { --accent: #00e5ff; --bg: #000; --p-bg: #0c0c0e; --text: #fff; --text-m: #888; --border: #222; --hover: #161618; --player: rgba(10,10,12,0.85); height: 100dvh; display: flex; flex-direction: column; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; transition: 0.3s; }
+        .main-layout.light-theme { --bg: #f5f5f7; --p-bg: #fff; --text: #1d1d1f; --text-m: #86868b; --border: #e2e2e7; --hover: #f5f5f7; --player: rgba(255,255,255,0.85); }
+        .header { padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); background: var(--p-bg); flex-shrink: 0; }
         .header-left { display: flex; align-items: center; gap: 15px; }
         .logo { font-size: 1.1rem; font-weight: 900; color: var(--accent); white-space: nowrap; }
         .last-updated { font-size: 0.6rem; color: var(--text-m); font-weight: normal; margin-left: 10px; opacity: 0.7; }
@@ -583,21 +601,26 @@ export default function Home() {
         .m-field { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
         .m-row { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; }
         .m-row b { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .player { position: fixed; bottom: 20px; left: 20px; right: 20px; z-index: 1000; padding: 15px 25px; background: var(--player); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid var(--border); border-radius: 20px; display: flex; align-items: center; gap: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
-        .p-btn { width: 45px; height: 45px; border-radius: 50%; background: var(--accent); border: none; font-size: 1rem; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #000; }
-        .p-info { flex: 1; display: flex; flex-direction: column; gap: 5px; }
-        .p-meta { display: flex; justify-content: space-between; font-size: 0.8rem; }
-        .p-bar { -webkit-appearance: none; height: 3px; background: var(--border); }
-        .p-bar::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; background: var(--accent); border-radius: 50%; cursor: pointer; }
+        .mobile-only { display: none; }
+        .mobile-eq-hint { padding: 20px; text-align: center; color: var(--text-m); font-size: 0.75rem; line-height: 1.6; }
+        .player { position: fixed; bottom: 20px; left: 20px; right: 20px; z-index: 1000; padding: 15px 25px; background: var(--player); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid var(--border); border-radius: 20px; display: flex; align-items: center; gap: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.4); }
+        .mobile-nav { display: none; }
         @media (max-width: 768px) {
+          .pc-only { display: none; }
+          .mobile-only { display: block; }
           .content-grid { grid-template-columns: 1fr; }
-          .panel { border-right: none; }
-          .hide { display: none; } .show { display: flex; }
-          .fx-grid { grid-template-columns: 1fr; }
-          .player { bottom: 0; left: 0; right: 0; border-radius: 20px 20px 0 0; padding-bottom: 35px; }
+          .left-sidebar, .panel { height: calc(100dvh - 200px); overflow-y: auto; padding-bottom: 120px; }
+          .hide-mobile { display: none; }
+          .show-mobile { display: flex; }
+          .player { bottom: 70px; left: 0; right: 0; border-radius: 20px 20px 0 0; border: none; border-top: 1px solid var(--border); padding-bottom: 15px; box-shadow: none; }
+          .mobile-nav { display: flex; position: fixed; bottom: 0; left: 0; right: 0; height: 70px; background: var(--p-bg); border-top: 1px solid var(--border); z-index: 1001; }
+          .nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; background: none; border: none; color: var(--text-m); gap: 4px; transition: 0.2s; }
+          .nav-item.active { color: var(--accent); }
+          .nav-icon { font-size: 1.2rem; }
+          .nav-label { font-size: 0.65rem; font-weight: bold; }
         }
-        .left-sidebar { display: flex; flex-direction: column; background: var(--p-bg); border-right: 1px solid var(--border); }
+        .left-sidebar { display: flex; flex-direction: column; background: var(--p-bg); border-right: 1px solid var(--border); overflow: hidden; }
       `}</style>
-    </main>
+    </main >
   );
 }
