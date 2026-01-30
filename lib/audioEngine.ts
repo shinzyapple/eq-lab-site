@@ -32,6 +32,7 @@ let isPlayingInternal = false;
 let lastTitle = 'Unknown Track';
 let lastArtist = 'EQ LAB';
 let lastAlbum = 'Audio Library';
+let playbackMode: 'buffer' | 'stream' | 'none' = 'none';
 
 function createImpulseResponse(context: AudioContext, duration: number, decay: number) {
   const sampleRate = context.sampleRate;
@@ -227,6 +228,7 @@ export function playBuffer(
 
   source.start(0, startAt);
   isPlayingInternal = true;
+  playbackMode = 'buffer';
 
   if ('mediaSession' in navigator) {
     navigator.mediaSession.playbackState = 'playing';
@@ -308,6 +310,7 @@ export function playStream(
   }
 
   isPlayingInternal = true;
+  playbackMode = 'stream';
 
   if ('mediaSession' in navigator) {
     navigator.mediaSession.playbackState = 'playing';
@@ -490,7 +493,7 @@ export function getIsPlaying() {
 
 export function getCurrentTime() {
   if (!audioContext) return offsetTime;
-  if (mediaElement && mediaElement.src) {
+  if (playbackMode === 'stream' && mediaElement) {
     return mediaElement.currentTime;
   }
   return isPlayingInternal ? (audioContext.currentTime - startTime + offsetTime) : offsetTime;
@@ -498,9 +501,15 @@ export function getCurrentTime() {
 
 export function setOffsetTime(time: number) {
   offsetTime = time;
+  if (playbackMode === 'stream' && mediaElement) {
+    mediaElement.currentTime = time;
+  }
 }
 
 export function getDuration() {
+  if (playbackMode === 'stream' && mediaElement && !isNaN(mediaElement.duration)) {
+    return mediaElement.duration;
+  }
   return currentBuffer?.duration || 0;
 }
 
@@ -540,7 +549,13 @@ export function stop() {
     source.onended = null;
     source = null;
   }
+  if (mediaElement) {
+    mediaElement.pause();
+    mediaElement.src = "";
+    mediaElement.load();
+  }
   isPlayingInternal = false;
+  playbackMode = 'none';
   if ('mediaSession' in navigator) {
     navigator.mediaSession.playbackState = 'paused';
   }
