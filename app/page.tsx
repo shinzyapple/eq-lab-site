@@ -412,7 +412,24 @@ export default function Home() {
         const matchedGains = await getMatchingEq(sBuf, tBuf);
         setEqGains(matchedGains);
         matchedGains.forEach((g, i) => setEqGain(i, g));
-        alert("Matching Complete!");
+
+        // Auto-save result if user wants
+        const name = prompt("Matchingが完了しました。この設定をプリセットとして保存しますか？（未入力でキャンセル）", "Matched Preset");
+        const userEmail = session?.user?.email;
+        if (name && userEmail) {
+          const { data } = await supabase.from("presets").insert([{
+            name,
+            user_email: userEmail,
+            eq_gains: matchedGains,
+            reverb_dry: reverbDry,
+            reverb_wet: reverbWet,
+            volume
+          }]).select();
+          if (data) setPresets(v => [...v, { id: data[0].id, name, eqGains: [...matchedGains], reverbDry, reverbWet, volume }]);
+          alert(`プリセット "${name}" を保存しました。`);
+        } else {
+          alert("Matching Complete!");
+        }
       } else {
         alert("Could not load tracks for matching.");
       }
@@ -610,8 +627,8 @@ export default function Home() {
         .fx-box label { font-size: 0.65rem; color: var(--text-m); font-weight: bold; }
         .f-r { display: flex; flex-direction: column; gap: 5px; }
         input[type="range"] { -webkit-appearance: none; height: 3px; background: var(--border); border-radius: 2px; }
-        .pre-box { padding: 0 20px 140px; flex: 1; overflow: hidden; display: flex; flex-direction: column; }
-        .preset-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-top: 10px; }
+        .pre-box { padding: 0 20px 20px; flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+        .preset-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 10px 0 160px; }
         .preset-item { padding: 12px 16px; background: var(--hover); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.85rem; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: 0.2s; }
         .preset-item:hover { border-color: var(--accent); background: rgba(0,229,255,0.05); }
         .p-del-btn { background: none; border: none; color: var(--text-m); font-size: 1.2rem; cursor: pointer; padding: 0 5px; }
@@ -622,7 +639,7 @@ export default function Home() {
         .m-row b { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .mobile-only { display: none; }
         .mobile-eq-hint { padding: 20px; text-align: center; color: var(--text-m); font-size: 0.75rem; line-height: 1.6; }
-        .player { position: fixed; bottom: 20px; left: 20px; right: 20px; z-index: 1000; padding: 15px 25px; background: var(--player); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid var(--border); border-radius: 20px; display: flex; align-items: center; gap: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.4); }
+        .player { position: fixed; bottom: 20px; left: 20px; right: 20px; z-index: 2000; padding: 15px 25px; background: var(--player); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid var(--border); border-radius: 20px; display: flex; align-items: center; gap: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.4); }
         .mobile-nav { display: none; }
         .left-sidebar { display: flex; flex-direction: column; background: var(--p-bg); border-right: 1px solid var(--border); overflow: hidden; }
 
