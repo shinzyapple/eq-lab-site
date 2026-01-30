@@ -90,21 +90,22 @@ export default function Home() {
         }
 
         if (data) {
-          console.log(`Download complete, decoding...`);
-          const buffer = await loadAudio(new File([data], track.name));
+          // MEMORY OPTIMIZATION: Decode using the smallest possible footprint.
+          // Don't store buffers for every track in the library array.
+          console.log(`Download complete, decoding... Space check: ${data.size} bytes`);
 
-          // Update library cache
-          const updater = (t: Track) => t.id === track.id ? { ...t, buffer } : t;
-          setLibrary(prev => prev.map(updater));
+          setIsBuffering(true); // Ensure decoding status is shown
+          const buffer = await loadAudio(data); // Pass blob directly
 
-          // CRITICAL: Also update currentTrack so subsequent calls find the buffer
+          // Only update the currently active track's buffer. 
+          // Do NOT update the 'library' state here to prevent memory bloat.
           setCurrentTrack(curr => curr?.id === track.id ? { ...curr, buffer } : curr);
 
           return buffer;
         }
       } catch (e: any) {
         console.error("Failed to load cloud track:", e);
-        alert(`楽曲の解析に失敗しました: ${e.message || '不明なエラー'}`);
+        alert(`楽曲の解析（デコード）に失敗しました。ファイルが大きすぎる可能性があります: ${e.message || '不明なエラー'}`);
       }
     }
     return null;
@@ -473,17 +474,15 @@ export default function Home() {
       }
 
       console.log(`Attempting to play: ${currentTrack.name}`);
-      if (!currentTrack.buffer) setIsBuffering(true);
+      setIsBuffering(true);
 
       try {
         const buffer = await loadTrackBuffer(currentTrack);
         if (buffer) {
-          // Re-resume context right before play in case async fetch suspended it
+          // Re-resume context for iOS
           await initContext();
           playBuffer(buffer, progress, volume, eqGains, reverbDry, reverbWet);
           setIsPlaying(true);
-        } else {
-          console.error("No buffer returned from loadTrackBuffer");
         }
       } catch (e: any) {
         console.error("Playback error:", e);
@@ -803,7 +802,10 @@ export default function Home() {
           {isBuffering ? <span className="loader-s"></span> : (isPlaying ? "Ⅱ" : "▶")}
         </button>
         <div className="p-info">
-          <div className="p-meta"><b>{currentTrack?.name || "Ready"}</b> <span>{formatTime(progress)} / {formatTime(duration)}</span></div>
+          <div className="p-meta">
+            <b>{isBuffering ? "Loading/Decoding..." : (currentTrack?.name || "Ready")}</b>
+            <span>{formatTime(progress)} / {formatTime(duration)}</span>
+          </div>
           <input
             type="range" min="0" max={duration || 1} step="0.01" value={progress}
             onInput={(e) => { setIsDragging(true); setProgress(parseFloat((e.target as any).value)); }}

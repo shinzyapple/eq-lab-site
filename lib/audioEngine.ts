@@ -86,7 +86,7 @@ export function resumeContext() {
   }
 }
 
-export async function loadAudio(urlOrFile: string | File): Promise<AudioBuffer> {
+export async function loadAudio(urlOrFile: string | File | Blob): Promise<AudioBuffer> {
   const ctx = await initContext();
   if (!ctx) throw new Error("AudioContext not initialized");
 
@@ -98,9 +98,11 @@ export async function loadAudio(urlOrFile: string | File): Promise<AudioBuffer> 
       const res = await fetch(urlOrFile);
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
       arrayBuffer = await res.arrayBuffer();
-    } else {
-      console.log(`Loading audio from File: ${urlOrFile.name} (${urlOrFile.size} bytes)`);
+    } else if (urlOrFile instanceof Blob) {
+      console.log(`Loading audio from Blob/File: size ${urlOrFile.size} bytes`);
       arrayBuffer = await urlOrFile.arrayBuffer();
+    } else {
+      throw new Error("Unsupported audio source type");
     }
 
     console.log(`ArrayBuffer obtained: ${arrayBuffer.byteLength} bytes. Starting decode...`);
