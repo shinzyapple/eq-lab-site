@@ -61,6 +61,7 @@ export default function Home() {
   const { data: session, status } = useSession();
   const isLoadingSession = status === "loading";
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<string>("");
 
   const requestRef = useRef<number | null>(null);
 
@@ -69,15 +70,22 @@ export default function Home() {
     if (track.buffer) return track.buffer;
     if (track.filePath) {
       try {
-        const { data } = supabase.storage.from("eq-lab-tracks").getPublicUrl(track.filePath);
-        if (data?.publicUrl) {
-          const buffer = await loadAudio(data.publicUrl);
-          // Optional: Update track in library with buffer to cache it
+        console.log(`Downloading track from Supabase Storage: ${track.filePath}`);
+        const { data, error } = await supabase.storage.from("eq-lab-tracks").download(track.filePath);
+
+        if (error) {
+          console.error("Supabase storage download error:", error);
+          throw error;
+        }
+
+        if (data) {
+          const buffer = await loadAudio(new File([data], track.name));
+          // Update track in library with buffer to cache it
           setLibrary(prev => prev.map(t => t.id === track.id ? { ...t, buffer } : t));
           return buffer;
         }
       } catch (e) {
-        console.error("Failed to load cloud track", e);
+        console.error("Failed to load cloud track:", e);
       }
     }
     return null;
@@ -156,6 +164,7 @@ export default function Home() {
 
   // Sync Presets
   useEffect(() => {
+    setUpdatedAt(new Date().toLocaleString("ja-JP"));
     const userEmail = session?.user?.email;
     if (isLoadingSession || !userEmail) return;
     const fetchPresets = async () => {
@@ -343,7 +352,7 @@ export default function Home() {
     <main className={`main-layout ${theme === "light" ? "light-theme" : ""}`}>
       <header className="header">
         <div className="header-left">
-          <h1 className="logo">EQ LAB</h1>
+          <h1 className="logo">EQ LAB <small className="last-updated">更新: {updatedAt}</small></h1>
           <button onClick={() => setTheme(t => t === "dark" ? "light" : "dark")} className="theme-btn">{theme === "dark" ? "☀️" : "🌙"}</button>
         </div>
         <div className="auth">
@@ -447,7 +456,8 @@ export default function Home() {
         .main-layout.light-theme { --bg: #f5f5f7; --p-bg: #fff; --text: #1d1d1f; --text-m: #86868b; --border: #e2e2e7; --hover: #f5f5f7; --player: rgba(255,255,255,0.75); }
         .header { padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); background: var(--p-bg); }
         .header-left { display: flex; align-items: center; gap: 15px; }
-        .logo { font-size: 1.1rem; font-weight: 900; color: var(--accent); }
+        .logo { font-size: 1.1rem; font-weight: 900; color: var(--accent); white-space: nowrap; }
+        .last-updated { font-size: 0.6rem; color: var(--text-m); font-weight: normal; margin-left: 10px; opacity: 0.7; }
         .theme-btn { background: none; border: none; font-size: 1.2rem; cursor: pointer; }
         .btn-s { background: var(--border); border: none; color: var(--text); padding: 6px 12px; border-radius: 4px; font-size: 0.8rem; cursor: pointer; }
         .btn-xs { background: var(--accent); color: #000; border: none; padding: 4px 10px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; cursor: pointer; }
