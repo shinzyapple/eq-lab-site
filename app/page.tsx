@@ -62,6 +62,7 @@ export default function Home() {
   const isLoadingSession = status === "loading";
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<string>("");
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
 
   const requestRef = useRef<number | null>(null);
 
@@ -278,6 +279,26 @@ export default function Home() {
     e.target.value = "";
   };
 
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingFile(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDraggingFile(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingFile(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type.startsWith("audio/")) {
+      // Mock an event structure for handleFileUpload compatibility or just call a shared logic
+      const mockEvent = { target: { files: [file], value: "" } } as any;
+      handleFileUpload(mockEvent, "library");
+    }
+  };
+
   const togglePlay = async () => {
     if (isPlaying) {
       stop();
@@ -386,12 +407,24 @@ export default function Home() {
       <div className="content-grid">
         {/* Left Sidebar: Library & Matching */}
         <aside className="left-sidebar">
-          <section className="glass-panel library-section">
-            <h2 className="section-title">ライブラリ</h2>
+          <section
+            className={`glass-panel library-section ${isDraggingFile ? "drag-active" : ""}`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
+            <div className="section-head-row">
+              <h2 className="section-title">ライブラリ</h2>
+              <label className="add-icon-btn" title="AUDIOを追加">
+                <input type="file" accept="audio/*" onChange={(e) => handleFileUpload(e, "library")} style={{ display: "none" }} />
+                +
+              </label>
+            </div>
+
             <div className="track-list">
               {library.length === 0 && (
-                <p style={{ fontSize: "0.7rem", opacity: 0.5, textAlign: "center", padding: "20px" }}>
-                  音声ファイルがありません。下のボタンから追加してください。
+                <p style={{ fontSize: "0.7rem", opacity: 0.5, textAlign: "center", padding: "40px 20px" }}>
+                  音声ファイルがありません。<br />ここにドロップするか、上の＋ボタンから追加してください。
                 </p>
               )}
               {library.map((track) => (
@@ -418,11 +451,7 @@ export default function Home() {
                 </div>
               ))}
             </div>
-            <label className="upload-label">
-              AUDIOを追加
-              <input type="file" accept="audio/*" onChange={(e) => handleFileUpload(e, "library")} style={{ display: "none" }} />
-              <div className="add-btn">+</div>
-            </label>
+            {isDraggingFile && <div className="drag-overlay">ファイルをドロップして追加</div>}
           </section>
         </aside>
 
@@ -488,9 +517,14 @@ export default function Home() {
         .content-grid { flex: 1; display: grid; grid-template-columns: 320px 1fr 300px; overflow: hidden; }
         .panel { display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--p-bg); overflow: hidden; }
         .panel-head { padding: 20px; display: flex; justify-content: space-between; align-items: center; }
-        h2 { font-size: 0.7rem; color: var(--text-m); letter-spacing: 1px; }
-        .library-section { display: flex; flex-direction: column; height: 100%; overflow: hidden; border-right: 1px solid var(--border);}
-        .track-list { flex: 1; overflow-y: auto; padding: 0 10px 20px; }
+        h2 { font-size: 0.7rem; color: var(--text-m); letter-spacing: 1px; margin: 0; }
+        .library-section { display: flex; flex-direction: column; height: 100%; overflow: hidden; border-right: 1px solid var(--border); position: relative; transition: 0.2s; }
+        .library-section.drag-active { background: rgba(0, 229, 255, 0.05); outline: 2px dashed var(--accent); outline-offset: -10px; }
+        .section-head-row { padding: 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); }
+        .add-icon-btn { width: 28px; height: 28px; background: var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text); font-size: 1.2rem; transition: 0.2s; }
+        .add-icon-btn:hover { background: var(--accent); color: #000; }
+        .drag-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; font-size: 0.9rem; color: var(--accent); pointer-events: none; z-index: 10; font-weight: bold; }
+        .track-list { flex: 1; overflow-y: auto; padding: 10px; }
         .library-item { padding: 10px 12px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; }
         .library-item:hover { background: var(--hover); }
         .active { background: var(--hover); color: var(--accent); }
@@ -535,6 +569,7 @@ export default function Home() {
           .fx-grid { grid-template-columns: 1fr; }
           .player { bottom: 0; left: 0; right: 0; border-radius: 20px 20px 0 0; padding-bottom: 35px; }
         }
+        .left-sidebar { display: flex; flex-direction: column; background: var(--p-bg); border-right: 1px solid var(--border); }
       `}</style>
     </main>
   );
