@@ -511,7 +511,19 @@ export default function Home() {
             </div></div>
             <div className="fx-box"><label>Output Gain</label><input type="range" min="0" max="1.5" step="0.01" value={volume} onChange={e => { const v = parseFloat(e.target.value); setGlobalVolume(v); setVolume(v); }} className="wide" /></div>
           </div>
-          <div className="pre-box"><label>PRESETS</label><div className="p-s">{presets.map(p => <button key={p.id} onClick={() => applyPreset(p)} className="chip">{p.name} {(p.id !== 'flat' && p.id !== 'concert-hall') && <span onClick={e => { deletePreset(p.id, e); }} className="p-del">×</span>}</button>)}</div></div>
+          <div className="pre-box">
+            <label>PRESETS LIST</label>
+            <div className="preset-list">
+              {presets.map(p => (
+                <div key={p.id} onClick={() => applyPreset(p)} className="preset-item">
+                  <span className="preset-name">{p.name}</span>
+                  {(p.id !== 'flat' && p.id !== 'concert-hall') && (
+                    <button onClick={e => { deletePreset(p.id, e); }} className="p-del-btn">×</button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         </section>
 
         {/* Right Sidebar: Matching */}
@@ -598,10 +610,12 @@ export default function Home() {
         .fx-box label { font-size: 0.65rem; color: var(--text-m); font-weight: bold; }
         .f-r { display: flex; flex-direction: column; gap: 5px; }
         input[type="range"] { -webkit-appearance: none; height: 3px; background: var(--border); border-radius: 2px; }
-        .pre-box { padding: 0 20px 120px; }
-        .p-s { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 10px; }
-        .chip { background: var(--hover); border: 1px solid var(--border); color: var(--text); padding: 5px 12px; border-radius: 20px; font-size: 0.75rem; white-space: nowrap; display: flex; align-items: center; gap: 5px; cursor: pointer; }
-        .p-del { opacity: 0.3; } .p-del:hover { opacity: 1; color: #f00; }
+        .pre-box { padding: 0 20px 140px; flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+        .preset-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-top: 10px; }
+        .preset-item { padding: 12px 16px; background: var(--hover); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.85rem; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: 0.2s; }
+        .preset-item:hover { border-color: var(--accent); background: rgba(0,229,255,0.05); }
+        .p-del-btn { background: none; border: none; color: var(--text-m); font-size: 1.2rem; cursor: pointer; padding: 0 5px; }
+        .p-del-btn:hover { color: #f00; }
         .m-panel { padding: 20px; }
         .m-field { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
         .m-row { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; }
