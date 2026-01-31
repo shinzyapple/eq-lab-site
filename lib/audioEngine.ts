@@ -405,17 +405,21 @@ export async function getSpectrum(buffer: AudioBuffer): Promise<number[]> {
   const counts = new Int32Array(frequenciesCount).fill(0);
   const sampleRate = buffer.sampleRate;
 
-  // Capped sampling for performance
-  const numSamples = Math.min(50, Math.floor(buffer.length / fftSize));
+  // iOS/Mobile Optimization: Even fewer segments and aggressive sub-sampling
+  // 30 segments is enough for a spectral average, 50 was heavy for iPhone
+  const isMobile = typeof window !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  const numSamples = Math.min(isMobile ? 30 : 50, Math.floor(buffer.length / fftSize));
+
   if (numSamples <= 0) return Array.from(spectrum);
 
   const skip = Math.floor(buffer.length / numSamples);
-  console.log(`Analyzing spectrum: ${numSamples} segments...`);
+  console.log(`Analyzing spectrum (${isMobile ? 'Mobile Mode' : 'PC Mode'}): ${numSamples} segments...`);
 
-  const subStep = 16;
+  // subStep 16 -> 32 on mobile to further reduce CPU load without losing much accuracy
+  const subStep = isMobile ? 32 : 16;
   const numPoints = Math.ceil(fftSize / subStep);
 
-  // Pre-calculate sinusoids for frequencies - this avoids millions of Math.cos/sin calls
+  // Pre-calculate sinusoids
   const sinusoids = EQ_FREQUENCIES.map(f => {
     const angle = (2 * Math.PI * f) / sampleRate;
     const cos = new Float32Array(numPoints);
@@ -428,9 +432,9 @@ export async function getSpectrum(buffer: AudioBuffer): Promise<number[]> {
   });
 
   for (let i = 0; i < numSamples; i++) {
-    // Yield every 5 segments to keep UI responsive and avoid browser crash
-    if (i % 5 === 0) {
-      await new Promise(resolve => setTimeout(resolve, 0));
+    // Aggressive yielding on mobile: yield every 2 segments
+    if (i % (isMobile ? 2 : 5) === 0) {
+      await new Promise(resolve => setTimeout(resolve, 10)); // Longer pause for iOS to breathe
     }
 
     const start = i * skip;
@@ -443,6 +447,7 @@ export async function getSpectrum(buffer: AudioBuffer): Promise<number[]> {
       let real = 0, imag = 0;
       const { cos, sin } = sinusoids[bandIdx];
 
+      // Inner loop optimization
       for (let p = 0; p < pointsCount; p++) {
         const val = data[start + p * subStep];
         real += val * cos[p];
