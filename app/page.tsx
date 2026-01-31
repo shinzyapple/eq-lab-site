@@ -608,52 +608,95 @@ export default function Home() {
 
   const handleMatch = async () => {
     const sTrack = sourceTrack || currentTrack;
-    if (!sTrack || !targetTrack) return;
+    if (!sTrack || !targetTrack) {
+      alert("比較する楽曲（ソースとターゲット）を両方選択してください。");
+      return;
+    }
+
+    console.log(`Starting match process: ${sTrack.name} vs ${targetTrack.name}`);
     setIsMatching(true);
+
     try {
       // 1. Analyze Source Track
       console.log("Analyzing Source Track...");
       const sSource = await prepareTrackSource(sTrack, true);
-      if (!sSource?.buffer) throw new Error("ソース楽曲のロードに失敗しました。");
+      if (!sSource?.buffer) {
+        throw new Error(`ソース楽曲 (${sTrack.name}) のロードに失敗しました。ファイルが壊れているか、アクセス権がありません。`);
+      }
+
       const sSpec = await getSpectrum(sSource.buffer);
-      // buffer is now local and should be GC'd after this scope if not referenced elsewhere
+      console.log("Source Spectrum Analysis Complete.");
 
       // 2. Analyze Target Track
       console.log("Analyzing Target Track...");
       const tSource = await prepareTrackSource(targetTrack, true);
-      if (!tSource?.buffer) throw new Error("ターゲット楽曲のロードに失敗しました。");
+      if (!tSource?.buffer) {
+        throw new Error(`ターゲット楽曲 (${targetTrack.name}) のロードに失敗しました。ファイルが壊れているか、アクセス権がありません。`);
+      }
+
       const tSpec = await getSpectrum(tSource.buffer);
+      console.log("Target Spectrum Analysis Complete.");
 
       if (sSpec && tSpec) {
+        console.log("Calculating matched gains...");
         const matchedGains = calculateMatchedGains(sSpec, tSpec);
+
+        // Apply gains
         setEqGains(matchedGains);
         matchedGains.forEach((g: number, i: number) => setEqGain(i, g));
 
-        // Auto-save result if user wants
-        const name = prompt("Matchingが完了しました。この設定をプリセットとして保存しますか？（未入力でキャンセル）", "Matched Preset");
-        const userEmail = session?.user?.email;
-        if (name && userEmail) {
-          const { data } = await supabase.from("presets").insert([{
-            name,
-            user_email: userEmail,
-            eq_gains: matchedGains,
-            reverb_dry: reverbDry,
-            reverb_wet: reverbWet,
-            volume
-          }]).select();
-          if (data) setPresets(v => [...v, { id: data[0].id, name, eqGains: [...matchedGains], reverbDry, reverbWet, volume }]);
-          alert(`プリセット "${name}" を保存しました。`);
-        } else {
-          alert("Matching Complete!");
-        }
+        // Let the state settle before showing prompt
+        setTimeout(() => {
+          const name = prompt("比較（Matching）に成功しました！\nこの設定を新しいプリセットとして保存しますか？（空欄でキャンセル）", "Matched Preset");
+          const userEmail = session?.user?.email;
+          if (name && userEmail) {
+            saveMatchedPreset(name, matchedGains);
+          } else {
+            alert("Matching設定を現在のEQに適用しました。");
+          }
+        }, 100);
+
       } else {
-        alert("Could not analyze tracks for matching.");
+        throw new Error("楽曲の周波数解析に失敗しました。");
       }
     } catch (e: any) {
-      console.error(e);
-      alert(`Matching Error: ${e.message || e}`);
+      console.error("Match Process Error:", e);
+      alert(`比較中にエラーが発生しました:\n${e.message || '不明なエラーが発生しました。ファイルサイズが大きすぎるか、ブラウザのメモリが不足している可能性があります。'}`);
     } finally {
       setIsMatching(false);
+    }
+  };
+
+  const saveMatchedPreset = async (name: string, gains: number[]) => {
+    const userEmail = session?.user?.email;
+    if (!userEmail) return;
+
+    try {
+      const { data, error } = await supabase.from("presets").insert([{
+        name,
+        user_email: userEmail,
+        eq_gains: gains,
+        reverb_dry: reverbDry,
+        reverb_wet: reverbWet,
+        volume
+      }]).select();
+
+      if (error) throw error;
+
+      if (data) {
+        setPresets(v => [...v, {
+          id: data[0].id,
+          name,
+          eqGains: [...gains],
+          reverbDry,
+          reverbWet,
+          volume
+        }]);
+        alert(`プリセット "${name}" を保存しました。`);
+      }
+    } catch (e: any) {
+      console.error("Failed to save matched preset:", e);
+      alert("プリセットの保存に失敗しました。設定は現在のEQに適用されています。");
     }
   };
 

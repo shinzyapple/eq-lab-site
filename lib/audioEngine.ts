@@ -116,29 +116,34 @@ export async function loadAudio(urlOrFile: string | File | Blob): Promise<AudioB
     console.log(`ArrayBuffer obtained: ${arrayBuffer.byteLength} bytes. Starting decode...`);
     if (arrayBuffer.byteLength === 0) throw new Error("File is empty (0 bytes)");
 
-    // Support both promise-based and callback-based decodeAudioData
     return await new Promise<AudioBuffer>((resolve, reject) => {
-      ctx.decodeAudioData(
-        arrayBuffer,
-        (decoded) => {
-          console.log("Audio decoded successfully", { duration: decoded.duration, channels: decoded.numberOfChannels });
-          resolve(decoded);
-        },
-        (err) => {
-          console.error("decodeAudioData error:", err);
-          // If it fails, try a fallback or just reject
-          reject(err);
+      try {
+        const decodePromise = ctx.decodeAudioData(
+          arrayBuffer,
+          (decoded) => {
+            console.log("Audio decoded successfully", { duration: decoded.duration, channels: decoded.numberOfChannels });
+            resolve(decoded);
+          },
+          (err) => {
+            console.error("decodeAudioData callback error:", err);
+            reject(err);
+          }
+        );
+
+        // Handle case where decodeAudioData returns a promise (newer browsers)
+        if (decodePromise && typeof decodePromise.catch === 'function') {
+          decodePromise.catch(e => {
+            console.error("decodeAudioData promise error:", e);
+            reject(e);
+          });
         }
-      ).catch(e => {
-        // Some older browsers/implementations might throw or need this
-        console.error("decodeAudioData promise catch:", e);
+      } catch (e) {
+        console.error("Synchronous decodeAudioData error:", e);
         reject(e);
-      });
+      }
     });
   } catch (err) {
     console.error("loadAudio unexpected error:", err);
-    // Only return sample buffer for URLs (like base.wav) as a safe fallback.
-    // For Files, throw so the UI can catch it and alert the user.
     if (typeof urlOrFile !== "string") {
       throw err;
     }
@@ -395,64 +400,81 @@ export function updateMediaPositionState() {
 export async function getSpectrum(buffer: AudioBuffer): Promise<number[]> {
   const fftSize = 4096;
   const data = buffer.getChannelData(0);
-  const spectrum = new Float32Array(EQ_FREQUENCIES.length).fill(-100);
-  const counts = new Int32Array(EQ_FREQUENCIES.length).fill(0);
+  const frequenciesCount = EQ_FREQUENCIES.length;
+  const spectrum = new Float32Array(frequenciesCount).fill(-100);
+  const counts = new Int32Array(frequenciesCount).fill(0);
   const sampleRate = buffer.sampleRate;
 
-  // Reduced sampling for mobile performance: 50 segments is plenty for an average
+  // Capped sampling for performance
   const numSamples = Math.min(50, Math.floor(buffer.length / fftSize));
-  const skip = Math.floor(buffer.length / numSamples);
+  if (numSamples <= 0) return Array.from(spectrum);
 
+  const skip = Math.floor(buffer.length / numSamples);
   console.log(`Analyzing spectrum: ${numSamples} segments...`);
 
+  const subStep = 16;
+  const numPoints = Math.ceil(fftSize / subStep);
+
+  // Pre-calculate sinusoids for frequencies - this avoids millions of Math.cos/sin calls
+  const sinusoids = EQ_FREQUENCIES.map(f => {
+    const angle = (2 * Math.PI * f) / sampleRate;
+    const cos = new Float32Array(numPoints);
+    const sin = new Float32Array(numPoints);
+    for (let p = 0; p < numPoints; p++) {
+      cos[p] = Math.cos(angle * p * subStep);
+      sin[p] = Math.sin(angle * p * subStep);
+    }
+    return { cos, sin };
+  });
+
   for (let i = 0; i < numSamples; i++) {
+    // Yield every 5 segments to keep UI responsive and avoid browser crash
+    if (i % 5 === 0) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+
     const start = i * skip;
-    const end = start + fftSize;
-    const slice = data.slice(start, end);
+    const maxN = Math.min(fftSize, data.length - start);
+    const pointsCount = Math.floor(maxN / subStep);
 
-    // Use a pre-calculated window function or just RMS in bands
-    // For 31 bands, we maps FFT bins to these bands.
-    // Optimization: Instead of full DFT per freq, let's use a simpler band-power estimate
-    // because doing 12M loops on mobile hangs.
+    if (pointsCount <= 0) continue;
 
-    EQ_FREQUENCIES.forEach((f, bandIdx) => {
-      // Calculate power in a window around the frequency
-      // For mobile, we take a faster approach: just sample the magnitude 
-      // by looking at the signal change (crude but fast) or using a smaller DFT.
+    for (let bandIdx = 0; bandIdx < frequenciesCount; bandIdx++) {
       let real = 0, imag = 0;
-      const angle = (2 * Math.PI * f) / sampleRate;
+      const { cos, sin } = sinusoids[bandIdx];
 
-      // OPTIMIZATION: Only sample 256 points per slice for frequency estimation
-      // instead of 4096. This is still very accurate for spectral balance.
-      const subStep = 16;
-      for (let n = 0; n < slice.length; n += subStep) {
-        const val = slice[n];
-        real += val * Math.cos(angle * n);
-        imag += val * Math.sin(angle * n);
+      for (let p = 0; p < pointsCount; p++) {
+        const val = data[start + p * subStep];
+        real += val * cos[p];
+        imag += val * sin[p];
       }
 
-      const mag = Math.sqrt(real * real + imag * imag) / (slice.length / subStep);
+      const mag = Math.sqrt(real * real + imag * imag) / pointsCount;
       const db = 20 * Math.log10(mag + 1e-9);
 
       if (counts[bandIdx] === 0) spectrum[bandIdx] = db;
       else spectrum[bandIdx] += db;
       counts[bandIdx]++;
-    });
+    }
   }
 
-  return Array.from(spectrum.map((val, i) => val / counts[i]));
+  return Array.from(spectrum.map((val, i) => counts[i] > 0 ? val / counts[i] : -100));
 }
 
 export function calculateMatchedGains(sourceSpec: number[], targetSpec: number[]): number[] {
-  // The matching EQ is the difference
   // Final gains are target - source
-  const diff = sourceSpec.map((s, i) => targetSpec[i] - s);
+  const diff = sourceSpec.map((s, i) => {
+    const d = targetSpec[i] - s;
+    return isFinite(d) ? d : 0;
+  });
 
-  // Calculate average difference to normalize volume (avoid boosting everything)
-  const avgDiff = diff.reduce((a, b) => a + b, 0) / diff.length;
+  // Calculate average difference to normalize volume
+  const validDiffs = diff.filter(d => !isNaN(d));
+  const avgDiff = validDiffs.length > 0 ? validDiffs.reduce((a, b) => a + b, 0) / validDiffs.length : 0;
 
   return diff.map(d => {
     let final = d - avgDiff;
+    if (!isFinite(final)) final = 0;
     // Limit to +/- 12dB for stability
     return Math.max(-12, Math.min(12, final));
   });
