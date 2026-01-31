@@ -413,7 +413,15 @@ export default function Home() {
         if (data) trackId = data[0].id;
       }
 
-      const newTrack: Track = { id: trackId, name: file.name, buffer, filePath };
+      const isMobile = window.innerWidth <= 768;
+      const newTrack: Track = {
+        id: trackId,
+        name: file.name,
+        // Don't keep the buffer in the central state on mobile to save RAM.
+        // It will be re-decoded only when actually played or matched.
+        buffer: isMobile ? undefined : buffer,
+        filePath
+      };
 
       if (mode === "library") {
         setLibrary(prev => {
@@ -423,7 +431,7 @@ export default function Home() {
           localStorage.setItem("eq-lab-library", JSON.stringify(toSave));
           return updated;
         });
-        if (window.innerWidth > 768) {
+        if (!isMobile) {
           setCurrentTrack(curr => curr || newTrack);
         }
       }
@@ -442,7 +450,6 @@ export default function Home() {
     } finally {
       setIsUploading(false);
     }
-
     e.target.value = "";
   };
 
@@ -617,25 +624,33 @@ export default function Home() {
     setIsMatching(true);
 
     try {
-      // 1. Analyze Source Track
-      console.log("Analyzing Source Track...");
-      const sSource = await prepareTrackSource(sTrack, true);
-      if (!sSource?.buffer) {
-        throw new Error(`ソース楽曲 (${sTrack.name}) のロードに失敗しました。ファイルが壊れているか、アクセス権がありません。`);
+      // 1. Analyze Source Track in an isolated scope
+      let sSpec: number[] | null = null;
+      {
+        console.log("Analyzing Source Track...");
+        const sSource = await prepareTrackSource(sTrack, true);
+        if (!sSource?.buffer) {
+          throw new Error(`ソース楽曲 (${sTrack.name}) のロードに失敗しました。`);
+        }
+        sSpec = await getSpectrum(sSource.buffer);
+        console.log("Source Spectrum Analysis Complete.");
+        // AudioBuffer is still in sSource.buffer, but sSource will fall out of scope.
       }
 
-      const sSpec = await getSpectrum(sSource.buffer);
-      console.log("Source Spectrum Analysis Complete.");
+      // Let iOS breathe and GC the first buffer before loading the second one
+      await new Promise(r => setTimeout(r, 400));
 
-      // 2. Analyze Target Track
-      console.log("Analyzing Target Track...");
-      const tSource = await prepareTrackSource(targetTrack, true);
-      if (!tSource?.buffer) {
-        throw new Error(`ターゲット楽曲 (${targetTrack.name}) のロードに失敗しました。ファイルが壊れているか、アクセス権がありません。`);
+      // 2. Analyze Target Track in another isolated scope
+      let tSpec: number[] | null = null;
+      {
+        console.log("Analyzing Target Track...");
+        const tSource = await prepareTrackSource(targetTrack, true);
+        if (!tSource?.buffer) {
+          throw new Error(`ターゲット楽曲 (${targetTrack.name}) のロードに失敗しました。`);
+        }
+        tSpec = await getSpectrum(tSource.buffer);
+        console.log("Target Spectrum Analysis Complete.");
       }
-
-      const tSpec = await getSpectrum(tSource.buffer);
-      console.log("Target Spectrum Analysis Complete.");
 
       if (sSpec && tSpec) {
         console.log("Calculating matched gains...");
@@ -645,7 +660,6 @@ export default function Home() {
         setEqGains(matchedGains);
         matchedGains.forEach((g: number, i: number) => setEqGain(i, g));
 
-        // Let the state settle before showing prompt
         setTimeout(() => {
           const name = prompt("比較（Matching）に成功しました！\nこの設定を新しいプリセットとして保存しますか？（空欄でキャンセル）", "Matched Preset");
           const userEmail = session?.user?.email;
@@ -661,7 +675,7 @@ export default function Home() {
       }
     } catch (e: any) {
       console.error("Match Process Error:", e);
-      alert(`比較中にエラーが発生しました:\n${e.message || '不明なエラーが発生しました。ファイルサイズが大きすぎるか、ブラウザのメモリが不足している可能性があります。'}`);
+      alert(`比較中にエラーが発生しました。\niPhone等の場合はファイルサイズを小さくするか、ブラウザの他のタブを閉じてからお試しください。\n\n詳細: ${e.message || '不明なエラー'}`);
     } finally {
       setIsMatching(false);
     }

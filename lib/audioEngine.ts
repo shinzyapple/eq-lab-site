@@ -405,19 +405,19 @@ export async function getSpectrum(buffer: AudioBuffer): Promise<number[]> {
   const counts = new Int32Array(frequenciesCount).fill(0);
   const sampleRate = buffer.sampleRate;
 
-  // iOS/Mobile Optimization: Even fewer segments and aggressive sub-sampling
-  // 30 segments is enough for a spectral average, 50 was heavy for iPhone
   const isMobile = typeof window !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  const numSamples = Math.min(isMobile ? 30 : 50, Math.floor(buffer.length / fftSize));
+
+  // Mobile needs stay well below the 5s watchdog limit.
+  // We reduce sample segments to 20 for mobile - still accurate enough for EQ balance.
+  const numSamples = Math.min(isMobile ? 20 : 50, Math.floor(buffer.length / fftSize));
 
   if (numSamples <= 0) return Array.from(spectrum);
 
   const skip = Math.floor(buffer.length / numSamples);
-  console.log(`Analyzing spectrum (${isMobile ? 'Mobile Mode' : 'PC Mode'}): ${numSamples} segments...`);
-
-  // subStep 16 -> 32 on mobile to further reduce CPU load without losing much accuracy
-  const subStep = isMobile ? 32 : 16;
+  const subStep = isMobile ? 64 : 16; // Even lighter sampling for mobile
   const numPoints = Math.ceil(fftSize / subStep);
+
+  console.log(`Analyzing spectrum: ${numSamples} segments, ${subStep} subStep`);
 
   // Pre-calculate sinusoids
   const sinusoids = EQ_FREQUENCIES.map(f => {
@@ -432,9 +432,11 @@ export async function getSpectrum(buffer: AudioBuffer): Promise<number[]> {
   });
 
   for (let i = 0; i < numSamples; i++) {
-    // Aggressive yielding on mobile: yield every 2 segments
-    if (i % (isMobile ? 2 : 5) === 0) {
-      await new Promise(resolve => setTimeout(resolve, 10)); // Longer pause for iOS to breathe
+    // Heavy yielding for iOS: use requestAnimationFrame to ensure the main thread stays green
+    if (isMobile) {
+      await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 20)));
+    } else if (i % 10 === 0) {
+      await new Promise(resolve => setTimeout(resolve, 0));
     }
 
     const start = i * skip;
@@ -447,7 +449,6 @@ export async function getSpectrum(buffer: AudioBuffer): Promise<number[]> {
       let real = 0, imag = 0;
       const { cos, sin } = sinusoids[bandIdx];
 
-      // Inner loop optimization
       for (let p = 0; p < pointsCount; p++) {
         const val = data[start + p * subStep];
         real += val * cos[p];
