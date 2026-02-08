@@ -10,6 +10,7 @@ let reverbNode: ConvolverNode | null = null;
 let reverbWetGain: GainNode | null = null;
 let reverbDryGain: GainNode | null = null;
 let mainGainNode: GainNode | null = null;
+let analyzerNode: AnalyserNode | null = null;
 let streamDest: MediaStreamAudioDestinationNode | null = null;
 let proxyAudio: HTMLAudioElement | null = null;
 let mediaElement: HTMLAudioElement | null = null;
@@ -61,6 +62,9 @@ export async function initContext() {
     proxyAudio.srcObject = streamDest.stream;
     proxyAudio.setAttribute("playsinline", "true");
     proxyAudio.muted = false; // iOS requirement for lock screen
+
+    analyzerNode = audioContext.createAnalyser();
+    analyzerNode.fftSize = 256;
 
     // Create the hidden media element for streaming
     mediaElement = new Audio();
@@ -220,11 +224,13 @@ export function playBuffer(
   reverbDryGain.connect(mainGainNode);
   reverbWetGain.connect(mainGainNode);
 
+  mainGainNode.connect(analyzerNode!);
+
   // PIPE OUTPUT
   if (streamDest) {
-    mainGainNode.connect(streamDest);
+    analyzerNode!.connect(streamDest);
   } else {
-    mainGainNode.connect(audioContext.destination);
+    analyzerNode!.connect(audioContext.destination);
   }
 
   if (proxyAudio) {
@@ -549,26 +555,40 @@ export function setVolume(value: number) {
   }
 }
 
-export function stop() {
+export function getVisualizerData() {
+  if (!analyzerNode) return new Uint8Array(0);
+  const dataArray = new Uint8Array(analyzerNode.frequencyBinCount);
+  analyzerNode.getByteFrequencyData(dataArray);
+  return dataArray;
+}
+
+export function stop(fadeTime = 0.1) {
   if (proxyAudio) {
     proxyAudio.pause();
   }
-  if (source) {
-    try {
-      source.stop();
-    } catch (e) {
+
+  if (mainGainNode && audioContext) {
+    const now = audioContext.currentTime;
+    mainGainNode.gain.setTargetAtTime(0, now, fadeTime / 4);
+  }
+
+  setTimeout(() => {
+    if (source) {
+      try {
+        source.stop();
+      } catch (e) { }
+      source.onended = null;
+      source = null;
     }
-    source.onended = null;
-    source = null;
-  }
-  if (mediaElement) {
-    mediaElement.pause();
-    mediaElement.src = "";
-    mediaElement.load();
-  }
-  isPlayingInternal = false;
-  playbackMode = 'none';
-  if ('mediaSession' in navigator) {
-    navigator.mediaSession.playbackState = 'paused';
-  }
+    if (mediaElement) {
+      mediaElement.pause();
+      mediaElement.src = "";
+      mediaElement.load();
+    }
+    isPlayingInternal = false;
+    playbackMode = 'none';
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = 'paused';
+    }
+  }, fadeTime * 1000);
 }
