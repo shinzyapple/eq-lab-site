@@ -77,12 +77,7 @@ export default function Home() {
     if (track.buffer) return { buffer: track.buffer };
 
     try {
-      if (track.id === "default") {
-        const buffer = await loadAudio("/audio/base.wav");
-        return { buffer };
-      }
-
-      const trackId = track.id === "default" ? "default" : Number(track.id);
+      const trackId = Number(track.id);
       const localTrack = await db.tracks.get(trackId);
       if (localTrack) {
         const buffer = await loadAudio(localTrack.data);
@@ -132,18 +127,7 @@ export default function Home() {
       setIsLoadingLibrary(true);
 
       try {
-        // 1. Load Default Track
-        let defaultTrack: Track | null = null;
-        try {
-          const buffer = await loadAudio("/audio/base.wav");
-          defaultTrack = { id: "default", name: "サンプル曲 (base.wav)", buffer };
-        } catch (e) {
-          console.warn("Base audio load failed, creating fallback");
-          const ctx = await initContext();
-          defaultTrack = ctx ? { id: "default", name: "⚠️ 初期警告音 (ファイル未検出)", buffer: createSampleBuffer(ctx) } : null;
-        }
-
-        // 2. Load Tracks from IndexedDB
+        // 1. Load Tracks from IndexedDB
         const localTracks = await db.tracks.toArray();
         const formattedLocalTracks: Track[] = localTracks.map(t => ({
           id: t.id!.toString(),
@@ -152,14 +136,12 @@ export default function Home() {
 
         if (!isMounted) return;
 
-        // 3. Combine
-        const combined = defaultTrack ? [defaultTrack, ...formattedLocalTracks] : [...formattedLocalTracks];
-        setLibrary(combined);
+        setLibrary(formattedLocalTracks);
 
         // Restore last selected track
         const lastId = (window as any).__lastTrackId;
         if (lastId) {
-          const matched = combined.find(t => t.id === lastId);
+          const matched = formattedLocalTracks.find((t: Track) => t.id === lastId);
           if (matched) {
             setCurrentTrack(matched);
             // Pre-load restored track
@@ -173,7 +155,7 @@ export default function Home() {
           delete (window as any).__lastTrackId;
         }
 
-        console.log(`Library sync complete: ${combined.length} tracks`);
+        console.log(`Library sync complete: ${formattedLocalTracks.length} tracks`);
       } catch (err) {
         console.error("Local DB fetch error:", err);
       } finally {
@@ -410,12 +392,11 @@ export default function Home() {
   const deleteTrack = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const track = library.find(t => t.id === id);
-    if (!track || id === "default") return;
+    if (!track) return;
     if (!confirm(`楽曲 "${track.name}" を削除しますか？`)) return;
 
     try {
       console.log("Removing track from local database...");
-      // Convert id back to number for Dexie if needed, but Dexie can handle numeric strings if auto-incremented
       await db.tracks.delete(Number(id));
 
       setLibrary(prev => prev.filter(t => t.id !== id));
