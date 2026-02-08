@@ -636,7 +636,32 @@ export default function Home() {
 
       <div className="content-grid">
         {/* Left Sidebar: Library */}
-        <aside className="sidebar-library">
+        <aside
+          className={`sidebar-library ${isDraggingFile ? "drag-active" : ""}`}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          style={{ position: "relative" }}
+        >
+          {isDraggingFile && (
+            <div style={{
+              position: "absolute",
+              inset: 0,
+              background: "rgba(139, 92, 246, 0.2)",
+              backdropFilter: "blur(4px)",
+              border: "2px dashed var(--accent)",
+              zIndex: 10,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              pointerEvents: "none",
+              borderRadius: "inherit"
+            }}>
+              <div style={{ background: "var(--p-bg)", padding: "12px 24px", borderRadius: "20px", fontWeight: "bold", boxShadow: "var(--shadow)" }}>
+                Drop to Add Audio
+              </div>
+            </div>
+          )}
           <div className="panel-head">
             <h2 className="section-title">Library</h2>
             <button className="add-icon-btn" onClick={() => fileInputRef.current?.click()} style={{ background: "var(--accent)", color: "white", border: "none", width: 28, height: 28, borderRadius: "50%", cursor: "pointer", fontWeight: "bold" }}>+</button>
