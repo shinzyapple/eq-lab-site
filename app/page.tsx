@@ -278,7 +278,7 @@ export default function Home() {
     };
   }, [isDragging]);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, mode: "library" | "source" | "target") => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement> | { target: { files: File[], value: string } }, mode: "library" | "source" | "target") => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -287,9 +287,8 @@ export default function Home() {
       let buffer: AudioBuffer | undefined;
       let trackId = Math.random().toString(36).substr(2, 9);
 
-      // On mobile, large files + parsing = crash.
-      // We skip local decode if we just want to save to DB.
-      const isMobile = window.innerWidth <= 768;
+      // On mobile, decode on upload often causes OOM/Crash.
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
       if (mode !== "library" || !isMobile) {
         buffer = await loadAudio(file);
       }
@@ -328,8 +327,8 @@ export default function Home() {
       alert(`アップロードに失敗しました: ${err.message || '不明なエラー'}`);
     } finally {
       setIsUploading(false);
+      try { e.target.value = ""; } catch (e) { }
     }
-    e.target.value = "";
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -665,7 +664,7 @@ export default function Home() {
           <div className="panel-head">
             <h2 className="section-title">Library</h2>
             <button className="add-icon-btn" onClick={() => fileInputRef.current?.click()} style={{ background: "var(--accent)", color: "white", border: "none", width: 28, height: 28, borderRadius: "50%", cursor: "pointer", fontWeight: "bold" }}>+</button>
-            <input ref={fileInputRef} type="file" accept=".mp3,.wav,.m4a,.aac,.ogg,.mp4,.flac,.caf,.aiff,audio/*" onChange={(e) => handleFileUpload(e, "library")} style={{ display: "none" }} />
+            <input ref={fileInputRef} type="file" accept="audio/*,audio/x-caf,audio/caf,audio/x-m4a,audio/mp3,audio/wav,.caf,.mp3,.wav,.m4a" onChange={(e) => handleFileUpload(e, "library")} style={{ display: "none" }} />
           </div>
 
           <div style={{ flex: 1, overflowY: "auto", padding: "0 12px" }}>
@@ -781,7 +780,7 @@ export default function Home() {
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <div style={{ fontWeight: 600, fontSize: "0.9rem", flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{targetTrack?.name || "Load file..."}</div>
                 <label className="btn-s" style={{ background: "var(--border)", padding: "4px 10px", borderRadius: 6, fontSize: "0.75rem", cursor: "pointer" }}>
-                  Pick <input type="file" accept=".mp3,.wav,.m4a,.aac,.ogg,.mp4,.flac,.caf,.aiff,audio/*" hidden onChange={e => handleFileUpload(e, "target")} />
+                  Pick <input type="file" accept="audio/*,audio/x-caf,audio/caf,audio/x-m4a,audio/mp3,audio/wav,.caf,.mp3,.wav,.m4a" hidden onChange={e => handleFileUpload(e, "target")} />
                 </label>
               </div>
             </div>
