@@ -115,18 +115,45 @@ export function suspendContext() {
   if (audioContext && audioContext.state === "running") audioContext.suspend();
 }
 
-export async function loadAudio(urlOrFile: string | File | Blob): Promise<AudioBuffer> {
+// Memory-efficient buffer loading for analysis (especially on mobile)
+export async function loadBufferForAnalysis(urlOrFile: string | File | Blob): Promise<AudioBuffer> {
   const ctx = await initContext();
-  if (!ctx) throw new Error("Context failed");
-  let arrayBuffer: ArrayBuffer;
+  if (!ctx) throw new Error("AudioContext failed to initialize");
+
+  let blob: Blob;
   if (typeof urlOrFile === "string") {
     const res = await fetch(urlOrFile);
-    arrayBuffer = await res.arrayBuffer();
+    blob = await res.blob();
   } else {
-    arrayBuffer = await urlOrFile.arrayBuffer();
+    blob = urlOrFile;
   }
-  return await ctx.decodeAudioData(arrayBuffer);
+
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+  // If the file is very large (> 8MB) on mobile, we slice it to decode only the first portion
+  // Most audio files for analysis only need the first 30-60s to understand the spectrum.
+  if (isMobile && blob.size > 8 * 1024 * 1024) {
+    console.log(`Large file (${(blob.size / 1024 / 1024).toFixed(1)}MB) detected. Slicing for analysis...`);
+    // Slicing works well for WAV. For MP3/AAC, decoders usually handle the first chunk if header is present.
+    blob = blob.slice(0, 8 * 1024 * 1024);
+  }
+
+  const arrayBuffer = await blob.arrayBuffer();
+  try {
+    return await ctx.decodeAudioData(arrayBuffer);
+  } catch (e) {
+    console.warn("Initial decode failed, trying standard full decode as last resort...", e);
+    // If slicing caused a decode error (rare with modern browsers), try the whole thing if it's not TOO big
+    if (blob.size < 20 * 1024 * 1024) {
+      const fullRes = await fetch(typeof urlOrFile === 'string' ? urlOrFile : URL.createObjectURL(urlOrFile));
+      return await ctx.decodeAudioData(await fullRes.arrayBuffer());
+    }
+    throw e;
+  }
 }
+
+// Standard loader (memory-safe for most cases)
+export const loadAudio = loadBufferForAnalysis;
 
 export function createSampleBuffer(context: AudioContext): AudioBuffer {
   const duration = 2.0;
@@ -248,7 +275,13 @@ export async function getSpectrum(buffer: AudioBuffer): Promise<number[]> {
   const step = Math.floor(analyzeLimit / numSamples);
   const spectrum = new Array(EQ_FREQUENCIES.length).fill(0);
   for (let i = 0; i < numSamples; i++) {
-    if (isMobile && i % 5 === 0) await new Promise(r => requestAnimationFrame(r));
+    // Crucial for iPhone: yield the main thread frequently or Safari will kill the tab
+    if (isMobile) {
+      await new Promise(r => requestAnimationFrame(r));
+      // Give additional breathing room every 5 segments
+      if (i % 5 === 0) await new Promise(r => setTimeout(r, 10));
+    }
+
     const start = i * step;
     EQ_FREQUENCIES.forEach((f, fIdx) => {
       let real = 0, imag = 0;

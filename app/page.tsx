@@ -10,6 +10,7 @@ import {
   setVolume,
   EQ_FREQUENCIES,
   loadAudio,
+  loadBufferForAnalysis,
   getCurrentTime,
   getDuration,
   getIsPlaying,
@@ -533,57 +534,49 @@ export default function Home() {
     setIsMatching(true);
 
     try {
-      // 1. Analyze Source Track in an isolated scope
+      // 1. Analyze Source Track
       let sSpec: number[] | null = null;
-      {
-        console.log("Analyzing Source Track...");
-        const sSource = await prepareTrackSource(sTrack);
-        if (!sSource?.buffer) {
-          throw new Error(`ソース楽曲 (${sTrack.name}) のロードに失敗しました。`);
-        }
-        sSpec = await getSpectrum(sSource.buffer);
-        console.log("Source Spectrum Analysis Complete.");
-        // AudioBuffer is still in sSource.buffer, but sSource will fall out of scope.
-      }
+      console.log("Analyzing Source Track...");
 
-      // Let iOS breathe and GC the first buffer before loading the second one
-      await new Promise(r => setTimeout(r, 400));
+      // Get track data directly for analysis - avoid prepareTrackSource which might only give URL
+      const sLocal = await db.tracks.get(Number(sTrack.id));
+      if (!sLocal) throw new Error("ソース楽曲が見つかりません。");
 
-      // 2. Analyze Target Track in another isolated scope
+      const sBuffer = await loadBufferForAnalysis(sLocal.data);
+      sSpec = await getSpectrum(sBuffer);
+      console.log("Source Spectrum Analysis Complete.");
+
+      // Let iOS breathe and GC
+      await new Promise(r => setTimeout(r, 600));
+
+      // 2. Analyze Target Track
       let tSpec: number[] | null = null;
-      {
-        console.log("Analyzing Target Track...");
-        const tSource = await prepareTrackSource(targetTrack);
-        if (!tSource?.buffer) {
-          throw new Error(`ターゲット楽曲 (${targetTrack.name}) のロードに失敗しました。`);
-        }
-        tSpec = await getSpectrum(tSource.buffer);
-        console.log("Target Spectrum Analysis Complete.");
-      }
+      console.log("Analyzing Target Track...");
+
+      const tLocal = await db.tracks.get(Number(targetTrack.id));
+      if (!tLocal) throw new Error("ターゲット楽曲が見つかりません。");
+
+      const tBuffer = await loadBufferForAnalysis(tLocal.data);
+      tSpec = await getSpectrum(tBuffer);
+      console.log("Target Spectrum Analysis Complete.");
 
       if (sSpec && tSpec) {
         console.log("Calculating matched gains...");
         const matchedGains = calculateMatchedGains(sSpec, tSpec);
-
-        // Apply gains
         setEqGains(matchedGains);
         matchedGains.forEach((g: number, i: number) => setEqGain(i, g));
 
         setTimeout(() => {
           const name = prompt("比較（Matching）に成功しました！\nこの設定を新しいプリセットとして保存しますか？（空欄でキャンセル）", "Matched Preset");
-          if (name) {
-            saveMatchedPreset(name, matchedGains);
-          } else {
-            alert("Matching設定を現在のEQに適用しました。");
-          }
+          if (name) saveMatchedPreset(name, matchedGains);
+          else alert("Matching設定を現在のEQに適用しました。");
         }, 100);
-
       } else {
         throw new Error("楽曲の周波数解析に失敗しました。");
       }
     } catch (e: any) {
       console.error("Match Process Error:", e);
-      alert(`比較中にエラーが発生しました。\niPhone等の場合はファイルサイズを小さくするか、ブラウザの他のタブを閉じてからお試しください。\n\n詳細: ${e.message || '不明なエラー'}`);
+      alert(`比較中にエラーが発生しました。\niPhone等の場合はブラウザの他のタブを閉じてからお試しください。\n\n詳細: ${e.message || '不明なエラー'}`);
     } finally {
       setIsMatching(false);
     }
