@@ -80,14 +80,23 @@ export async function initContext() {
     analyzerNode = audioContext.createAnalyser();
     analyzerNode.fftSize = 256;
     mainGainNode.connect(analyzerNode);
-    analyzerNode.connect(audioContext.destination);
+
     streamDest = audioContext.createMediaStreamDestination();
     analyzerNode.connect(streamDest);
+
     proxyAudio = new Audio();
     proxyAudio.srcObject = streamDest.stream;
     proxyAudio.setAttribute("playsinline", "true");
+
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    proxyAudio.muted = !isMobile;
+    if (isMobile) {
+      // Route through proxyAudio only for background support on mobile
+      proxyAudio.muted = false;
+    } else {
+      // Route directly for better performance on desktop
+      analyzerNode.connect(audioContext.destination);
+      proxyAudio.muted = true;
+    }
     proxyAudio.play().catch(() => { });
     mediaElement = new Audio();
     mediaElement.crossOrigin = "anonymous";
