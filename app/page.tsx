@@ -345,7 +345,7 @@ export default function Home() {
     e.preventDefault();
     setIsDraggingFile(false);
     const file = e.dataTransfer.files?.[0];
-    if (file && file.type.startsWith("audio/")) {
+    if (file && (file.type.startsWith("audio/") || file.name.match(/\.(mp3|wav|m4a|aac|ogg|caf|flac|aiff)$/i))) {
       // Mock an event structure for handleFileUpload compatibility or just call a shared logic
       const mockEvent = { target: { files: [file], value: "" } } as any;
       handleFileUpload(mockEvent, "library");
@@ -640,7 +640,7 @@ export default function Home() {
           <div className="panel-head">
             <h2 className="section-title">Library</h2>
             <button className="add-icon-btn" onClick={() => fileInputRef.current?.click()} style={{ background: "var(--accent)", color: "white", border: "none", width: 28, height: 28, borderRadius: "50%", cursor: "pointer", fontWeight: "bold" }}>+</button>
-            <input ref={fileInputRef} type="file" accept=".mp3,.wav,.m4a,.aac,.ogg,.mp4,audio/*" onChange={(e) => handleFileUpload(e, "library")} style={{ display: "none" }} />
+            <input ref={fileInputRef} type="file" accept=".mp3,.wav,.m4a,.aac,.ogg,.mp4,.flac,.caf,.aiff,audio/*" onChange={(e) => handleFileUpload(e, "library")} style={{ display: "none" }} />
           </div>
 
           <div style={{ flex: 1, overflowY: "auto", padding: "0 12px" }}>
@@ -756,7 +756,7 @@ export default function Home() {
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <div style={{ fontWeight: 600, fontSize: "0.9rem", flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{targetTrack?.name || "Load file..."}</div>
                 <label className="btn-s" style={{ background: "var(--border)", padding: "4px 10px", borderRadius: 6, fontSize: "0.75rem", cursor: "pointer" }}>
-                  Pick <input type="file" accept=".mp3,.wav,.m4a,.aac,.ogg,.mp4,audio/*" hidden onChange={e => handleFileUpload(e, "target")} />
+                  Pick <input type="file" accept=".mp3,.wav,.m4a,.aac,.ogg,.mp4,.flac,.caf,.aiff,audio/*" hidden onChange={e => handleFileUpload(e, "target")} />
                 </label>
               </div>
             </div>
