@@ -103,16 +103,25 @@ export default function Home() {
         const s = JSON.parse(savedSettings);
         if (s.eqGains) {
           setEqGains(s.eqGains);
-          s.eqGains.forEach((g: number, i: number) => setEqGain(i, g));
         }
-        if (s.reverbDry !== undefined) { setRevDry(s.reverbDry); setReverbDry(s.reverbDry); }
-        if (s.reverbWet !== undefined) { setRevWet(s.reverbWet); setReverbWet(s.reverbWet); }
-        if (s.volume !== undefined) { setGlobalVolume(s.volume); setVolume(s.volume); }
+        if (s.reverbDry !== undefined) setRevDry(s.reverbDry);
+        if (s.reverbWet !== undefined) setRevWet(s.reverbWet);
+        if (s.volume !== undefined) setGlobalVolume(s.volume);
         if (s.activePresetId) setActivePresetId(s.activePresetId);
         if (s.currentTrackId) (window as any).__lastTrackId = s.currentTrackId;
-      } catch (e) { console.error("Failed to parse saved settings"); }
+      } catch (e) {
+        console.error("Failed to parse saved settings", e);
+      }
     }
   }, []);
+
+  // Update engine whenever basic FX state changes
+  useEffect(() => {
+    eqGains.forEach((g, i) => setEqGain(i, g));
+    setReverbDry(reverbDry);
+    setReverbWet(reverbWet);
+    setVolume(volume);
+  }, [eqGains, reverbDry, reverbWet, volume]);
 
   // Separate Effect for Local DB Sync
   useEffect(() => {
@@ -418,11 +427,15 @@ export default function Home() {
     }
   };
 
-  const applyPreset = (p: Preset) => {
+  const applyPreset = async (p: Preset) => {
+    await initContext();
     setActivePresetId(p.id);
-    setEqGains([...p.eqGains]); setRevDry(p.reverbDry); setRevWet(p.reverbWet); setGlobalVolume(p.volume);
-    p.eqGains.forEach((g, i) => setEqGain(i, g));
-    setReverbDry(p.reverbDry); setReverbWet(p.reverbWet); setVolume(p.volume);
+    setEqGains([...p.eqGains]);
+    setRevDry(p.reverbDry);
+    setRevWet(p.reverbWet);
+    setGlobalVolume(p.volume);
+
+    // Engine update is handled by useEffect
   };
 
   const updateActivePreset = (updatedFields: Partial<Preset>) => {
