@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useSession, signIn, signOut } from "next-auth/react";
 import {
   playBuffer,
   stop,
@@ -16,25 +15,21 @@ import {
   getIsPlaying,
   getSpectrum,
   calculateMatchedGains,
-  setOffsetTime,
-  suspendContext,
   resumeContext,
   initContext,
   createSampleBuffer,
   setAudioEngineCallbacks,
   updateMediaMetadata,
   updateMediaPositionState,
-  playStream,
   seekTo
 } from "@/lib/audioEngine";
 import { defaultPresets, Preset } from "@/lib/presets";
-import { supabase } from "@/lib/supabaseClient";
+import { db } from "@/lib/db";
 
 type Track = {
   id: string;
   name: string;
   buffer?: AudioBuffer;
-  filePath?: string;
 };
 
 const formatTime = (seconds: number) => {
@@ -65,8 +60,6 @@ export default function Home() {
   const [sourceTrack, setSourceTrack] = useState<Track | null>(null);
   const [targetTrack, setTargetTrack] = useState<Track | null>(null);
 
-  const { data: session, status } = useSession();
-  const isLoadingSession = status === "loading";
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<string>("");
   const [isDraggingFile, setIsDraggingFile] = useState(false);
@@ -79,56 +72,35 @@ export default function Home() {
 
   // Helper to load buffer if missing
   // Pre-load logic: returns either a buffer or a signed URL for streaming
-  const prepareTrackSource = async (track: Track, forceBuffer = false): Promise<{ buffer?: AudioBuffer, url?: string } | null> => {
+  const prepareTrackSource = async (track: Track): Promise<{ buffer?: AudioBuffer, url?: string } | null> => {
     if (track.buffer) return { buffer: track.buffer };
 
-    if (track.filePath) {
-      try {
-        // If we ONLY want the buffer (e.g. for Matching analysis), download + decode
-        if (forceBuffer) {
-          console.log(`Downloading track for analysis: ${track.filePath}`);
-          const { data, error } = await supabase.storage.from("eq-lab-tracks").download(track.filePath);
-          if (error) throw error;
-          const buffer = await loadAudio(data);
-          // Don't update currentTrack here to avoid side effects during background analysis
+    try {
+      // Fetch from IndexedDB if ID is not 'default'
+      if (track.id !== "default") {
+        console.log(`Fetching track from local database: ${track.id}`);
+        // Dexie ID can be string or number, library IDs are strings
+        const localTrack = await db.tracks.get(track.id);
+        if (localTrack) {
+          const buffer = await loadAudio(localTrack.data);
           return { buffer };
         }
-
-        // Standard Playback: Get signed URL for streaming
-        console.log(`Getting signed URL for streaming: ${track.filePath}`);
-        const { data, error } = await supabase.storage
-          .from("eq-lab-tracks")
-          .createSignedUrl(track.filePath, 3600); // 1 hour
-
-        if (error) {
-          console.error("Signed URL Error, falling back to download:", error);
-          const { data: fileData, error: dlError } = await supabase.storage.from("eq-lab-tracks").download(track.filePath);
-          if (dlError) throw dlError;
-          const buffer = await loadAudio(fileData);
-          return { buffer };
-        }
-
-        if (data?.signedUrl) return { url: data.signedUrl };
-      } catch (e: any) {
-        console.error("Failed to prepare track source:", e);
-        alert(`楽曲の準備に失敗しました: ${e.message || '不明なエラー'}`);
       }
+
+      // Fallback for default track if buffer is missing
+      if (track.id === "default") {
+        const buffer = await loadAudio("/audio/base.wav");
+        return { buffer };
+      }
+    } catch (e: any) {
+      console.error("Failed to prepare track source:", e);
+      alert(`楽曲の準備に失敗しました: ${e.message || '不明なエラー'}`);
     }
     return null;
   };
 
   // Load all local storage settings once on mount
   useEffect(() => {
-    const savedLib = localStorage.getItem("eq-lab-library");
-    if (savedLib) {
-      try {
-        const parsed = JSON.parse(savedLib);
-        const metadataOnly = parsed.map((t: any) => ({ ...t, buffer: undefined }));
-        setLibrary(metadataOnly);
-        console.log("Restored library from localStorage", metadataOnly.length);
-      } catch (e) { console.error("Failed to parse saved library"); }
-    }
-
     const savedSettings = localStorage.getItem("eq-lab-settings");
     if (savedSettings) {
       try {
@@ -146,97 +118,58 @@ export default function Home() {
     }
   }, []);
 
-  // Separate Effect for Cloud Sync: Triggered by session changes
+  // Separate Effect for Local DB Sync
   useEffect(() => {
-    // CRITICAL: If session is still loading, do nothing. 
-    // This prevents wiping out the results restored from localStorage in the first effect.
-    if (status === "loading") return;
-
     let isMounted = true;
-    const userEmail = session?.user?.email;
 
     const syncLibrary = async () => {
-      console.log("Starting cloud/default sync... Auth status:", status);
+      console.log("Starting local library sync...");
+      setIsLoadingLibrary(true);
 
-      // 1. Parallel fetch: Default track and Cloud tracks
-      const [defaultTrackRes, cloudTracksRes] = await Promise.allSettled([
-        (async () => {
-          try {
-            const buffer = await loadAudio("/audio/base.wav");
-            return { id: "default", name: "サンプル曲 (base.wav)", buffer } as Track;
-          } catch (e) {
-            console.warn("Base audio load failed, creating fallback");
-            const ctx = await initContext();
-            return ctx ? { id: "default", name: "⚠️ 初期警告音 (ファイル未検出)", buffer: createSampleBuffer(ctx) } : null;
-          }
-        })(),
-        (async () => {
-          if (!userEmail) return [] as Track[];
-          setIsLoadingLibrary(true);
-          try {
-            const { data, error } = await supabase
-              .from("tracks")
-              .select("*")
-              .eq("user_email", userEmail)
-              .order("created_at", { ascending: false });
-            if (data && !error) {
-              return data.map(t => ({ id: t.id, name: t.name, filePath: t.file_path })) as Track[];
-            }
-          } catch (err) {
-            console.error("Supabase fetch error:", err);
-          } finally {
-            if (isMounted) setIsLoadingLibrary(false);
-          }
-          return [] as Track[];
-        })()
-      ]);
+      try {
+        // 1. Load Default Track
+        let defaultTrack: Track | null = null;
+        try {
+          const buffer = await loadAudio("/audio/base.wav");
+          defaultTrack = { id: "default", name: "サンプル曲 (base.wav)", buffer };
+        } catch (e) {
+          console.warn("Base audio load failed, creating fallback");
+          const ctx = await initContext();
+          defaultTrack = ctx ? { id: "default", name: "⚠️ 初期警告音 (ファイル未検出)", buffer: createSampleBuffer(ctx) } : null;
+        }
 
-      if (!isMounted) return;
+        // 2. Load Tracks from IndexedDB
+        const localTracks = await db.tracks.toArray();
+        const formattedLocalTracks: Track[] = localTracks.map(t => ({
+          id: t.id!.toString(),
+          name: t.name,
+        }));
 
-      const defaultTrack = defaultTrackRes.status === 'fulfilled' ? defaultTrackRes.value : null;
-      const cloudTracks = cloudTracksRes.status === 'fulfilled' ? cloudTracksRes.value : [];
+        if (!isMounted) return;
 
-      // 3. Update the library state
-      setLibrary(prev => {
-        const cloudIds = new Set(cloudTracks.map(t => t.id));
-
-        // Filter previous state: 
-        // If logged in: only keep local/guest tracks or cloud tracks that are still in cloudIds.
-        // If guest: keep all existing local tracks.
-        const locals = prev.filter(t => {
-          if (t.id === "default") return false;
-          if (t.filePath) {
-            // If we are logged in, we only keep it if it's still in the cloud
-            if (userEmail) return cloudIds.has(t.id);
-            // If logged out but it has a path, it's a "ghost" from a previous session, usually we keep it
-            return true;
-          }
-          return true; // Guest tracks (no filePath) always stay
-        });
-
-        const combined = defaultTrack ? [defaultTrack, ...locals, ...cloudTracks] : [...locals, ...cloudTracks];
-        const unique = Array.from(new Map(combined.map(t => [t.id, t])).values());
-
-        // Update local storage with the combined metadata
-        const toSave = unique.map(t => ({ id: t.id, name: t.name, filePath: t.filePath }));
-        localStorage.setItem("eq-lab-library", JSON.stringify(toSave));
+        // 3. Combine
+        const combined = defaultTrack ? [defaultTrack, ...formattedLocalTracks] : [...formattedLocalTracks];
+        setLibrary(combined);
 
         // Restore last selected track
         const lastId = (window as any).__lastTrackId;
         if (lastId) {
-          const matched = unique.find(t => t.id === lastId);
+          const matched = combined.find(t => t.id === lastId);
           if (matched) setCurrentTrack(matched);
           delete (window as any).__lastTrackId;
         }
 
-        console.log(`Library sync complete: ${unique.length} tracks`);
-        return unique;
-      });
+        console.log(`Library sync complete: ${combined.length} tracks`);
+      } catch (err) {
+        console.error("Local DB fetch error:", err);
+      } finally {
+        setIsLoadingLibrary(false);
+      }
     };
 
     syncLibrary();
     return () => { isMounted = false; };
-  }, [session?.user?.email, status]);
+  }, []);
 
   // Handle currentTrack initialization and synchronization
   useEffect(() => {
@@ -286,45 +219,28 @@ export default function Home() {
     }
   }, [currentTrack]);
 
-  // Sync Presets
+  // Sync Presets from Local DB
   useEffect(() => {
     setUpdatedAt(new Date().toLocaleString("ja-JP"));
-    const userEmail = session?.user?.email;
-    if (isLoadingSession || !userEmail) return;
     const fetchPresets = async () => {
-      const { data } = await supabase.from("presets").select("*").eq("user_email", userEmail).order("id", { ascending: true });
-      if (data) {
-        const formatted = data.map((p: any) => ({
-          id: p.id,
+      try {
+        const localPresets = await db.presets.toArray();
+        const formatted = localPresets.map(p => ({
+          id: p.id!.toString(),
           name: p.name,
-          eqGains: p.eq_gains || [],
-          reverbDry: p.reverb_dry,
-          reverbWet: p.reverb_wet,
+          eqGains: p.eqGains,
+          reverbDry: p.reverbDry,
+          reverbWet: p.reverbWet,
           volume: p.volume
         }));
-        setPresets(prev => {
-          // Merge logic: Update existing presets if data matches, add new ones
-          const defaultIds = new Set(defaultPresets.map(p => p.id));
-          const customInPrev = prev.filter(p => !defaultIds.has(p.id));
 
-          // Re-create the list starting with defaults
-          const merged = [...defaultPresets];
-
-          formatted.forEach((cloudP: Preset) => {
-            const indexInMerged = merged.findIndex(p => p.id === cloudP.id);
-            if (indexInMerged > -1) {
-              merged[indexInMerged] = cloudP;
-            } else {
-              merged.push(cloudP);
-            }
-          });
-
-          return merged;
-        });
+        setPresets([...defaultPresets, ...formatted]);
+      } catch (err) {
+        console.error("Local preset fetch error:", err);
       }
     };
     fetchPresets();
-  }, [session?.user?.email, isLoadingSession]);
+  }, []);
 
   // Persistence Effect for Settings
   useEffect(() => {
@@ -370,70 +286,33 @@ export default function Home() {
     try {
       let buffer: AudioBuffer | undefined;
       let trackId = Math.random().toString(36).substr(2, 9);
-      let filePath = "";
-
-      const userEmail = session?.user?.email;
 
       // On mobile, large files + parsing = crash.
-      // We skip local decode if we are uploading to cloud.
-      if (mode !== "library" || !userEmail) {
+      // We skip local decode if we just want to save to DB.
+      const isMobile = window.innerWidth <= 768;
+      if (mode !== "library" || !isMobile) {
         buffer = await loadAudio(file);
       }
 
-      if (userEmail && mode === "library") {
-        // Use raw email for folder (essential for RLS policies) but safe name for file
-        const ext = file.name.includes('.') ? file.name.split('.').pop() : 'bin';
-        const safeName = `${Date.now()}-${Math.random().toString(36).substr(2, 5)}.${ext}`;
-        filePath = `${userEmail}/${safeName}`;
-
-        console.log(`Uploading to Supabase: ${filePath}`);
-
-        const { error: uploadError } = await supabase.storage
-          .from("eq-lab-tracks")
-          .upload(filePath, file, { cacheControl: '3600', upsert: false });
-
-        if (uploadError) {
-          console.error("Cloud Storage Upload Error:", uploadError);
-          const errorMsg = uploadError.message || JSON.stringify(uploadError, Object.getOwnPropertyNames(uploadError));
-          throw new Error(`Storage upload failed: ${errorMsg}`);
-        }
-
-        const { data, error: dbError } = await supabase
-          .from("tracks")
-          .insert([{ user_email: userEmail, name: file.name, file_path: filePath }])
-          .select();
-
-        if (dbError) {
-          console.error("Database Insert Error:", dbError);
-          // Cleanup storage if DB failed
-          await supabase.storage.from("eq-lab-tracks").remove([filePath]);
-          throw new Error(`Database entry failed: ${dbError.message || JSON.stringify(dbError)}`);
-        }
-
-        if (data) trackId = data[0].id;
+      if (mode === "library") {
+        console.log(`Saving to IndexedDB: ${file.name}`);
+        const id = await db.tracks.add({
+          name: file.name,
+          data: file,
+          createdAt: Date.now()
+        });
+        trackId = id.toString();
       }
 
-      const isMobile = window.innerWidth <= 768;
       const newTrack: Track = {
         id: trackId,
         name: file.name,
-        // Don't keep the buffer in the central state on mobile to save RAM.
-        // It will be re-decoded only when actually played or matched.
-        buffer: isMobile ? undefined : buffer,
-        filePath
+        buffer: buffer // Optional, will be re-loaded if undefined
       };
 
       if (mode === "library") {
-        setLibrary(prev => {
-          if (prev.find(t => t.id === newTrack.id)) return prev;
-          const updated = [newTrack, ...prev];
-          const toSave = updated.map(t => ({ id: t.id, name: t.name, filePath: t.filePath }));
-          localStorage.setItem("eq-lab-library", JSON.stringify(toSave));
-          return updated;
-        });
-        if (!isMobile) {
-          setCurrentTrack(curr => curr || newTrack);
-        }
+        setLibrary(prev => [newTrack, ...prev]);
+        setCurrentTrack(curr => curr || newTrack);
       }
       else if (mode === "source") {
         setSourceTrack(newTrack);
@@ -490,15 +369,10 @@ export default function Home() {
 
       try {
         const source = await prepareTrackSource(currentTrack);
-        if (source) {
+        if (source?.buffer) {
           await initContext(); // Re-prime for iOS
-          if (source.url) {
-            console.log("Starting STREAMING playback...");
-            playStream(source.url, progress, volume, eqGains, reverbDry, reverbWet);
-          } else if (source.buffer) {
-            console.log("Starting BUFFER playback...");
-            playBuffer(source.buffer, progress, volume, eqGains, reverbDry, reverbWet);
-          }
+          console.log("Starting BUFFER playback...");
+          playBuffer(source.buffer, progress, volume, eqGains, reverbDry, reverbWet);
           setIsPlaying(true);
         }
       } catch (e: any) {
@@ -522,23 +396,11 @@ export default function Home() {
     if (!confirm(`楽曲 "${track.name}" を削除しますか？`)) return;
 
     try {
-      if (track.filePath) {
-        console.log("Removing track from cloud storage/DB...");
-        const { error: sErr } = await supabase.storage.from("eq-lab-tracks").remove([track.filePath]);
-        if (sErr) console.warn("Storage removal warning:", sErr);
+      console.log("Removing track from local database...");
+      // Convert id back to number for Dexie if needed, but Dexie can handle numeric strings if auto-incremented
+      await db.tracks.delete(Number(id));
 
-        const { error: dbErr } = await supabase.from("tracks").delete().eq("id", id);
-        if (dbErr) throw new Error(`Database deletion failed: ${dbErr.message}`);
-      }
-
-      setLibrary(prev => {
-        const filtered = prev.filter(t => t.id !== id);
-        // Force immediate persistence to localStorage
-        const toSave = filtered.map(t => ({ id: t.id, name: t.name, filePath: t.filePath }));
-        localStorage.setItem("eq-lab-library", JSON.stringify(toSave));
-        return filtered;
-      });
-
+      setLibrary(prev => prev.filter(t => t.id !== id));
       if (currentTrack?.id === id) setCurrentTrack(null);
       console.log("Track deleted successfully");
     } catch (e: any) {
@@ -567,20 +429,21 @@ export default function Home() {
       return p;
     }));
 
-    // 2. Debounce server update
-    const userEmail = session?.user?.email;
-    if (isCustom && userEmail) {
+    // 2. Debounce local DB update
+    if (isCustom) {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = setTimeout(async () => {
-        const payload: any = {};
-        if (updatedFields.eqGains) payload.eq_gains = updatedFields.eqGains;
-        if (updatedFields.reverbDry !== undefined) payload.reverb_dry = updatedFields.reverbDry;
-        if (updatedFields.reverbWet !== undefined) payload.reverb_wet = updatedFields.reverbWet;
-        if (updatedFields.volume !== undefined) payload.volume = updatedFields.volume;
-
-        console.log("Syncing preset to server...", payload);
-        const { error } = await supabase.from("presets").update(payload).eq("id", activePresetId);
-        if (error) console.error("Server sync failed:", error);
+        console.log("Syncing preset to local DB...", activePresetId);
+        try {
+          await db.presets.update(Number(activePresetId), {
+            eqGains: updatedFields.eqGains || undefined,
+            reverbDry: updatedFields.reverbDry,
+            reverbWet: updatedFields.reverbWet,
+            volume: updatedFields.volume
+          });
+        } catch (err) {
+          console.error("Local DB preset update failed:", err);
+        }
       }, 1000);
     }
   };
@@ -592,23 +455,38 @@ export default function Home() {
   };
 
   const savePreset = async () => {
-    const userEmail = session?.user?.email;
-    if (!userEmail) return alert("Login required");
     const name = prompt("Preset Name", "My Preset");
     if (!name) return;
-    const { data } = await supabase.from("presets").insert([{ name, user_email: userEmail, eq_gains: eqGains, reverb_dry: reverbDry, reverb_wet: reverbWet, volume }]).select();
-    if (data) setPresets(v => [...v, { id: data[0].id, name, eqGains: [...eqGains], reverbDry, reverbWet, volume }]);
+
+    try {
+      const id = await db.presets.add({
+        name,
+        eqGains: [...eqGains],
+        reverbDry,
+        reverbWet,
+        volume,
+        createdAt: Date.now()
+      });
+
+      const newPreset = { id: id.toString(), name, eqGains: [...eqGains], reverbDry, reverbWet, volume };
+      setPresets(v => [...v, newPreset]);
+      applyPreset(newPreset);
+    } catch (err) {
+      console.error("Failed to save preset:", err);
+      alert("プリセットの保存に失敗しました。");
+    }
   };
 
   const deletePreset = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!confirm("このプリセットを削除しますか？")) return;
 
-    const { error } = await supabase.from("presets").delete().eq("id", id);
-    if (!error) {
+    try {
+      await db.presets.delete(Number(id));
       setPresets(prev => prev.filter(p => p.id !== id));
       if (activePresetId === id) setActivePresetId(null);
-    } else {
+    } catch (err) {
+      console.error("Delete preset failed:", err);
       alert("削除に失敗しました。");
     }
   };
@@ -628,7 +506,7 @@ export default function Home() {
       let sSpec: number[] | null = null;
       {
         console.log("Analyzing Source Track...");
-        const sSource = await prepareTrackSource(sTrack, true);
+        const sSource = await prepareTrackSource(sTrack);
         if (!sSource?.buffer) {
           throw new Error(`ソース楽曲 (${sTrack.name}) のロードに失敗しました。`);
         }
@@ -644,7 +522,7 @@ export default function Home() {
       let tSpec: number[] | null = null;
       {
         console.log("Analyzing Target Track...");
-        const tSource = await prepareTrackSource(targetTrack, true);
+        const tSource = await prepareTrackSource(targetTrack);
         if (!tSource?.buffer) {
           throw new Error(`ターゲット楽曲 (${targetTrack.name}) のロードに失敗しました。`);
         }
@@ -662,8 +540,7 @@ export default function Home() {
 
         setTimeout(() => {
           const name = prompt("比較（Matching）に成功しました！\nこの設定を新しいプリセットとして保存しますか？（空欄でキャンセル）", "Matched Preset");
-          const userEmail = session?.user?.email;
-          if (name && userEmail) {
+          if (name) {
             saveMatchedPreset(name, matchedGains);
           } else {
             alert("Matching設定を現在のEQに適用しました。");
@@ -682,32 +559,28 @@ export default function Home() {
   };
 
   const saveMatchedPreset = async (name: string, gains: number[]) => {
-    const userEmail = session?.user?.email;
-    if (!userEmail) return;
-
     try {
-      const { data, error } = await supabase.from("presets").insert([{
+      const id = await db.presets.add({
         name,
-        user_email: userEmail,
-        eq_gains: gains,
-        reverb_dry: reverbDry,
-        reverb_wet: reverbWet,
+        eqGains: [...gains],
+        reverbDry,
+        reverbWet,
+        volume,
+        createdAt: Date.now()
+      });
+
+      const newPreset = {
+        id: id.toString(),
+        name,
+        eqGains: [...gains],
+        reverbDry,
+        reverbWet,
         volume
-      }]).select();
+      };
 
-      if (error) throw error;
-
-      if (data) {
-        setPresets(v => [...v, {
-          id: data[0].id,
-          name,
-          eqGains: [...gains],
-          reverbDry,
-          reverbWet,
-          volume
-        }]);
-        alert(`プリセット "${name}" を保存しました。`);
-      }
+      setPresets(v => [...v, newPreset]);
+      applyPreset(newPreset);
+      alert(`プリセット "${name}" を保存しました。`);
     } catch (e: any) {
       console.error("Failed to save matched preset:", e);
       alert("プリセットの保存に失敗しました。設定は現在のEQに適用されています。");
@@ -720,9 +593,6 @@ export default function Home() {
         <div className="header-left">
           <h1 className="logo">EQ LAB <small className="last-updated">更新: {updatedAt}</small></h1>
           <button onClick={() => setTheme(t => t === "dark" ? "light" : "dark")} className="theme-btn">{theme === "dark" ? "☀️" : "🌙"}</button>
-        </div>
-        <div className="auth">
-          {isLoadingSession ? <span>...</span> : session ? <button onClick={() => signOut()} className="btn-s">{session.user?.name} (Logout)</button> : <button onClick={() => signIn()} className="btn-s">Login</button>}
         </div>
       </header>
 
@@ -757,18 +627,19 @@ export default function Home() {
               {isLoadingLibrary && (
                 <div className="library-loading">
                   <span className="loader-s"></span>
-                  <span>Syncing with Cloud...</span>
+                  <span>Loading local library...</span>
                 </div>
               )}
               {isUploading && (
                 <div className="uploading-indicator">
                   <span className="loader-s"></span>
-                  <span>Uploading to Cloud...</span>
+                  <span>Saving to local DB...</span>
                 </div>
               )}
               {library.length === 0 && !isUploading && (
                 <p style={{ fontSize: "0.7rem", opacity: 0.5, textAlign: "center", padding: "40px 20px" }}>
-                  音声ファイルがありません。<br />ここにドロップするか、上の＋ボタンから追加してください。
+                  音声ファイルがありません。<br />ここにドロップするか、上の＋ボタンから追加してください。<br />
+                  <span style={{ fontSize: "0.6rem" }}>※データはブラウザ内に保存されます。</span>
                 </p>
               )}
               {library.map((track) => (
@@ -780,9 +651,8 @@ export default function Home() {
                     setProgress(0);
                     if (isPlaying) {
                       const source = await prepareTrackSource(track);
-                      if (source) {
-                        if (source.url) playStream(source.url, 0, volume, eqGains, reverbDry, reverbWet);
-                        else if (source.buffer) playBuffer(source.buffer, 0, volume, eqGains, reverbDry, reverbWet);
+                      if (source?.buffer) {
+                        playBuffer(source.buffer, 0, volume, eqGains, reverbDry, reverbWet);
                       }
                     }
                   }}
