@@ -82,7 +82,8 @@ export default function Home() {
         return { buffer };
       }
 
-      const localTrack = await db.tracks.get(track.id);
+      const trackId = track.id === "default" ? "default" : Number(track.id);
+      const localTrack = await db.tracks.get(trackId);
       if (localTrack) {
         const buffer = await loadAudio(localTrack.data);
         return { buffer };
@@ -150,7 +151,16 @@ export default function Home() {
         const lastId = (window as any).__lastTrackId;
         if (lastId) {
           const matched = combined.find(t => t.id === lastId);
-          if (matched) setCurrentTrack(matched);
+          if (matched) {
+            setCurrentTrack(matched);
+            // Pre-load restored track
+            prepareTrackSource(matched).then(source => {
+              if (source?.buffer) {
+                setDuration(source.buffer.duration);
+                setCurrentTrack({ ...matched, buffer: source.buffer });
+              }
+            });
+          }
           delete (window as any).__lastTrackId;
         }
 
@@ -252,16 +262,20 @@ export default function Home() {
 
   // Progress Loop
   const updateProgress = () => {
-    const playing = getIsPlaying();
-    setIsPlaying(playing);
-    if (playing && !isDragging) {
+    const isAppPlaying = getIsPlaying();
+    setIsPlaying(isAppPlaying);
+
+    // Always update duration if we have a track
+    if (isAppPlaying && !isDragging) {
       const currentTime = getCurrentTime();
       setProgress(currentTime);
       setDuration(getDuration());
-      // Sync control center progress with OS
       if ('mediaSession' in navigator) {
         updateMediaPositionState();
       }
+    } else if (!isAppPlaying && currentTrack?.buffer) {
+      // If paused but we have the buffer, ensure duration is synced
+      setDuration(currentTrack.buffer.duration);
     }
     requestRef.current = requestAnimationFrame(updateProgress);
   };
@@ -644,9 +658,16 @@ export default function Home() {
                   await initContext();
                   setCurrentTrack(track);
                   setProgress(0);
-                  if (isPlaying) {
-                    const source = await prepareTrackSource(track);
-                    if (source?.buffer) playBuffer(source.buffer, 0, volume, eqGains, reverbDry, reverbWet);
+                  const source = await prepareTrackSource(track);
+                  if (source?.buffer) {
+                    setDuration(source.buffer.duration);
+                    const updatedTrack = { ...track, buffer: source.buffer };
+                    setCurrentTrack(updatedTrack);
+                    if (isPlaying) {
+                      playBuffer(source.buffer, 0, volume, eqGains, reverbDry, reverbWet);
+                    }
+                    // Cache buffer in library to show duration in list
+                    setLibrary(prev => prev.map(t => t.id === track.id ? updatedTrack : t));
                   }
                 }}
                 className={`track-item ${currentTrack?.id === track.id ? "active" : ""}`}
