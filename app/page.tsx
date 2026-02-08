@@ -22,7 +22,8 @@ import {
   updateMediaMetadata,
   updateMediaPositionState,
   seekTo,
-  getVisualizerData
+  getVisualizerData,
+  playStream
 } from "@/lib/audioEngine";
 import { defaultPresets, Preset } from "@/lib/presets";
 import { db } from "@/lib/db";
@@ -73,15 +74,24 @@ export default function Home() {
 
   // Helper to load buffer if missing
   // Pre-load logic: returns either a buffer or a signed URL for streaming
-  const prepareTrackSource = async (track: Track): Promise<{ buffer?: AudioBuffer } | null> => {
+  const prepareTrackSource = async (track: Track): Promise<{ buffer?: AudioBuffer, url?: string } | null> => {
     if (track.buffer) return { buffer: track.buffer };
 
     try {
       const trackId = Number(track.id);
       const localTrack = await db.tracks.get(trackId);
       if (localTrack) {
-        const buffer = await loadAudio(localTrack.data);
-        return { buffer };
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        // If file is > 4MB on mobile, we stream it to save memory
+        const shouldStream = isMobile && localTrack.data.size > 4 * 1024 * 1024;
+
+        if (shouldStream) {
+          const url = URL.createObjectURL(localTrack.data);
+          return { url };
+        } else {
+          const buffer = await loadAudio(localTrack.data);
+          return { buffer };
+        }
       }
     } catch (e: any) {
       console.error("Failed to prepare track source:", e);
@@ -149,6 +159,9 @@ export default function Home() {
               if (source?.buffer) {
                 setDuration(source.buffer.duration);
                 setCurrentTrack({ ...matched, buffer: source.buffer });
+              } else if (source?.url) {
+                // For streams, duration will be set when metadata loads in audioEngine
+                setCurrentTrack(matched);
               }
             });
           }
@@ -363,15 +376,16 @@ export default function Home() {
         return;
       }
 
-      console.log(`Attempting to play: ${currentTrack.name}`);
       setIsBuffering(true);
-
       try {
         const source = await prepareTrackSource(currentTrack);
         if (source?.buffer) {
-          await initContext(); // Re-prime for iOS
-          console.log("Starting BUFFER playback...");
+          await initContext();
           playBuffer(source.buffer, progress, volume, eqGains, reverbDry, reverbWet);
+          setIsPlaying(true);
+        } else if (source?.url) {
+          await initContext();
+          playStream(source.url, progress, volume, eqGains, reverbDry, reverbWet);
           setIsPlaying(true);
         }
       } catch (e: any) {
@@ -684,8 +698,12 @@ export default function Home() {
                     if (isPlaying) {
                       playBuffer(source.buffer, 0, volume, eqGains, reverbDry, reverbWet);
                     }
-                    // Cache buffer in library to show duration in list
                     setLibrary(prev => prev.map(t => t.id === track.id ? updatedTrack : t));
+                  } else if (source?.url) {
+                    setCurrentTrack(track);
+                    if (isPlaying) {
+                      playStream(source.url, 0, volume, eqGains, reverbDry, reverbWet);
+                    }
                   }
                 }}
                 className={`track-item ${currentTrack?.id === track.id ? "active" : ""}`}
