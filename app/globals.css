@@ -47,7 +47,6 @@ h3 {
   font-family: 'Lexend', sans-serif;
 }
 
-/* Scrollbar Styling */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -66,7 +65,6 @@ h3 {
   background: var(--text-dim);
 }
 
-/* Main Layout */
 .main-layout {
   height: 100vh;
   display: flex;
@@ -108,13 +106,21 @@ header {
   background: var(--border);
 }
 
-/* Sidebar & Panels */
-aside,
-section {
+.sidebar-library,
+.center-panel,
+.sidebar-matching {
   background: var(--p-bg);
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+.pc-only {
+  display: flex !important;
+}
+
+.mobile-only {
+  display: none !important;
 }
 
 .panel-head {
@@ -141,7 +147,6 @@ section {
   padding: 16px;
 }
 
-/* Player UI */
 .player-bar {
   position: fixed;
   bottom: 24px;
@@ -186,7 +191,6 @@ section {
   transform: scale(0.95);
 }
 
-/* EQ Styling */
 .eq-container {
   flex: 1;
   display: flex;
@@ -261,7 +265,6 @@ section {
   margin-top: 5px;
 }
 
-/* Track List */
 .track-item {
   padding: 12px 16px;
   border-radius: 12px;
@@ -283,7 +286,6 @@ section {
   border-left: 3px solid var(--accent);
 }
 
-/* Animations */
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -300,16 +302,47 @@ section {
   animation: fadeIn 0.4s ease forwards;
 }
 
-/* Mobile Adjustments */
 @media (max-width: 768px) {
+  .pc-only {
+    display: none !important;
+  }
+
+  .mobile-only {
+    display: flex !important;
+  }
+
   .content-grid {
     grid-template-columns: 1fr;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .sidebar-library,
+  .center-panel,
+  .sidebar-matching {
+    display: none !important;
+  }
+
+  main[data-active-tab="library"] .sidebar-library {
+    display: flex !important;
+  }
+
+  main[data-active-tab="eq"] .center-panel {
+    display: flex !important;
+  }
+
+  main[data-active-tab="matching"] .sidebar-matching {
+    display: flex !important;
   }
 
   .player-bar {
     width: 100%;
-    bottom: 0;
+    bottom: 64px;
     border-radius: 20px 20px 0 0;
-    height: 100px;
+    left: 0;
+    transform: none;
+    box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.4);
+    padding: 0 20px 20px;
+    height: 110px;
   }
 }

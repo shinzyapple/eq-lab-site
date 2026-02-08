@@ -73,24 +73,18 @@ export default function Home() {
 
   // Helper to load buffer if missing
   // Pre-load logic: returns either a buffer or a signed URL for streaming
-  const prepareTrackSource = async (track: Track): Promise<{ buffer?: AudioBuffer, url?: string } | null> => {
+  const prepareTrackSource = async (track: Track): Promise<{ buffer?: AudioBuffer } | null> => {
     if (track.buffer) return { buffer: track.buffer };
 
     try {
-      // Fetch from IndexedDB if ID is not 'default'
-      if (track.id !== "default") {
-        console.log(`Fetching track from local database: ${track.id}`);
-        // Dexie ID can be string or number, library IDs are strings
-        const localTrack = await db.tracks.get(track.id);
-        if (localTrack) {
-          const buffer = await loadAudio(localTrack.data);
-          return { buffer };
-        }
-      }
-
-      // Fallback for default track if buffer is missing
       if (track.id === "default") {
         const buffer = await loadAudio("/audio/base.wav");
+        return { buffer };
+      }
+
+      const localTrack = await db.tracks.get(track.id);
+      if (localTrack) {
+        const buffer = await loadAudio(localTrack.data);
         return { buffer };
       }
     } catch (e: any) {
@@ -619,7 +613,7 @@ export default function Home() {
   }, [isPlaying]);
 
   return (
-    <main className={`main-layout ${theme === "light" ? "light-theme" : ""}`}>
+    <main className={`main-layout ${theme === "light" ? "light-theme" : ""}`} data-active-tab={activeTab}>
       <header>
         <div className="header-left">
           <h1 className="logo">EQ LAB</h1>
@@ -634,11 +628,11 @@ export default function Home() {
 
       <div className="content-grid">
         {/* Left Sidebar: Library */}
-        <aside className={`${activeTab === "library" ? "show-mobile" : "hide-mobile"}`}>
+        <aside className="sidebar-library">
           <div className="panel-head">
             <h2 className="section-title">Library</h2>
             <button className="add-icon-btn" onClick={() => fileInputRef.current?.click()} style={{ background: "var(--accent)", color: "white", border: "none", width: 28, height: 28, borderRadius: "50%", cursor: "pointer", fontWeight: "bold" }}>+</button>
-            <input ref={fileInputRef} type="file" accept="audio/*" onChange={(e) => handleFileUpload(e, "library")} style={{ display: "none" }} />
+            <input ref={fileInputRef} type="file" accept=".mp3,.wav,.m4a,.aac,.ogg,.mp4,audio/*" onChange={(e) => handleFileUpload(e, "library")} style={{ display: "none" }} />
           </div>
 
           <div style={{ flex: 1, overflowY: "auto", padding: "0 12px" }}>
@@ -670,7 +664,7 @@ export default function Home() {
         </aside>
 
         {/* Center: EQ */}
-        <section className={`${activeTab === "eq" ? "show-mobile" : "hide-mobile"}`}>
+        <section className="center-panel">
           <div className="panel-head">
             <h2 className="section-title">Equalizer & Effects</h2>
             <button onClick={savePreset} className="btn-xs" style={{ background: "var(--accent)", color: "white", border: "none", padding: "6px 12px", borderRadius: 8, cursor: "pointer" }}>Save Preset</button>
@@ -733,7 +727,7 @@ export default function Home() {
         </section>
 
         {/* Right Sidebar: AI Match */}
-        <aside className={`${activeTab === "matching" ? "show-mobile" : "hide-mobile"}`}>
+        <aside className="sidebar-matching">
           <div className="panel-head">
             <h2 className="section-title">AI Matching</h2>
           </div>
@@ -747,7 +741,7 @@ export default function Home() {
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <div style={{ fontWeight: 600, fontSize: "0.9rem", flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{targetTrack?.name || "Load file..."}</div>
                 <label className="btn-s" style={{ background: "var(--border)", padding: "4px 10px", borderRadius: 6, fontSize: "0.75rem", cursor: "pointer" }}>
-                  Pick <input type="file" accept="audio/*" hidden onChange={e => handleFileUpload(e, "target")} />
+                  Pick <input type="file" accept=".mp3,.wav,.m4a,.aac,.ogg,.mp4,audio/*" hidden onChange={e => handleFileUpload(e, "target")} />
                 </label>
               </div>
             </div>

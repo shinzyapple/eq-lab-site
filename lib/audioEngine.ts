@@ -30,6 +30,7 @@ let currentBuffer: AudioBuffer | null = null;
 let startTime = 0;
 let offsetTime = 0;
 let isPlayingInternal = false;
+let stopTimeout: NodeJS.Timeout | null = null;
 let lastTitle = 'Unknown Track';
 let lastArtist = 'EQ LAB';
 let lastAlbum = 'Audio Library';
@@ -180,9 +181,12 @@ export function playBuffer(
     console.error("playBuffer failed: AudioContext not initialized");
     return;
   }
-  console.log(`playBuffer called at ${startAt}s. Context state: ${audioContext.state}`);
 
-  stop();
+  if (audioContext.state === 'suspended') {
+    audioContext.resume();
+  }
+
+  immediateStop();
 
   currentBuffer = buffer;
   offsetTime = startAt;
@@ -562,30 +566,41 @@ export function getVisualizerData() {
   return dataArray;
 }
 
+function immediateStop() {
+  if (stopTimeout) {
+    clearTimeout(stopTimeout);
+    stopTimeout = null;
+  }
+  if (proxyAudio) proxyAudio.pause();
+  if (source) {
+    try { source.stop(); } catch (e) { }
+    source.onended = null;
+    source = null;
+  }
+  if (mediaElement) {
+    mediaElement.pause();
+    mediaElement.src = "";
+    mediaElement.load();
+  }
+  isPlayingInternal = false;
+}
+
 export function stop(fadeTime = 0.1) {
+  if (stopTimeout) clearTimeout(stopTimeout);
+
   if (proxyAudio) {
     proxyAudio.pause();
   }
+
+  isPlayingInternal = false;
 
   if (mainGainNode && audioContext) {
     const now = audioContext.currentTime;
     mainGainNode.gain.setTargetAtTime(0, now, fadeTime / 4);
   }
 
-  setTimeout(() => {
-    if (source) {
-      try {
-        source.stop();
-      } catch (e) { }
-      source.onended = null;
-      source = null;
-    }
-    if (mediaElement) {
-      mediaElement.pause();
-      mediaElement.src = "";
-      mediaElement.load();
-    }
-    isPlayingInternal = false;
+  stopTimeout = setTimeout(() => {
+    immediateStop();
     playbackMode = 'none';
     if ('mediaSession' in navigator) {
       navigator.mediaSession.playbackState = 'paused';
