@@ -33,6 +33,7 @@ type Track = {
   id: string;
   name: string;
   buffer?: AudioBuffer;
+  file?: File | Blob; // Keep raw data for re-analysis or delayed decoding
 };
 
 const formatTime = (seconds: number) => {
@@ -335,7 +336,8 @@ export default function Home() {
       const newTrack: Track = {
         id: trackId,
         name: file.name,
-        buffer: buffer // Optional, will be re-loaded if undefined
+        buffer: buffer,
+        file: file
       };
 
       if (mode === "library") {
@@ -538,25 +540,39 @@ export default function Home() {
       let sSpec: number[] | null = null;
       console.log("Analyzing Source Track...");
 
-      // Get track data directly for analysis - avoid prepareTrackSource which might only give URL
-      const sLocal = await db.tracks.get(Number(sTrack.id));
-      if (!sLocal) throw new Error("ソース楽曲が見つかりません。");
+      let sBuffer = sTrack.buffer;
+      if (!sBuffer) {
+        const sNumericId = Number(sTrack.id);
+        if (!isNaN(sNumericId)) {
+          const sLocal = await db.tracks.get(sNumericId);
+          if (sLocal) sBuffer = await loadBufferForAnalysis(sLocal.data);
+        } else if (sTrack.file) {
+          sBuffer = await loadBufferForAnalysis(sTrack.file);
+        }
+      }
 
-      const sBuffer = await loadBufferForAnalysis(sLocal.data);
+      if (!sBuffer) throw new Error("ソース楽曲の読み込みに失敗しました。以前の楽曲データが失われている可能性があります。もう一度ファイルを選択してください。");
       sSpec = await getSpectrum(sBuffer);
       console.log("Source Spectrum Analysis Complete.");
 
-      // Let iOS breathe and GC
       await new Promise(r => setTimeout(r, 600));
 
       // 2. Analyze Target Track
       let tSpec: number[] | null = null;
       console.log("Analyzing Target Track...");
 
-      const tLocal = await db.tracks.get(Number(targetTrack.id));
-      if (!tLocal) throw new Error("ターゲット楽曲が見つかりません。");
+      let tBuffer = targetTrack.buffer;
+      if (!tBuffer) {
+        const tNumericId = Number(targetTrack.id);
+        if (!isNaN(tNumericId)) {
+          const tLocal = await db.tracks.get(tNumericId);
+          if (tLocal) tBuffer = await loadBufferForAnalysis(tLocal.data);
+        } else if (targetTrack.file) {
+          tBuffer = await loadBufferForAnalysis(targetTrack.file);
+        }
+      }
 
-      const tBuffer = await loadBufferForAnalysis(tLocal.data);
+      if (!tBuffer) throw new Error("ターゲット音源の読み込みに失敗しました。もう一度ファイルを選択してください。");
       tSpec = await getSpectrum(tBuffer);
       console.log("Target Spectrum Analysis Complete.");
 
