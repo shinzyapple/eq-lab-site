@@ -206,6 +206,8 @@ header {
   align-items: flex-end;
   padding: 40px 0;
   justify-content: center;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .eq-strip {

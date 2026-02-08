@@ -1,6 +1,5 @@
 export const EQ_FREQUENCIES = [
-  20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800,
-  1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000
+  31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000
 ];
 
 let audioContext: AudioContext | null = null;
@@ -34,15 +33,12 @@ let offsetTime = 0;
 let isPlayingInternal = false;
 let stopTimeout: NodeJS.Timeout | null = null;
 let lastTitle = 'Unknown Track';
-let lastArtist = 'EQ LAB';
-let lastAlbum = 'Audio Library';
 let playbackMode: 'buffer' | 'stream' | 'none' = 'none';
 
 function createImpulseResponse(context: AudioContext, duration: number, decay: number) {
   const sampleRate = context.sampleRate;
   const length = sampleRate * duration;
   const impulse = context.createBuffer(2, length, sampleRate);
-
   for (let channel = 0; channel < 2; channel++) {
     const channelData = impulse.getChannelData(channel);
     for (let i = 0; i < length; i++) {
@@ -58,11 +54,7 @@ export async function initContext() {
     audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({
       latencyHint: 'playback'
     });
-
-    // 1. Core Input
     masterInput = audioContext.createGain();
-
-    // 2. EQ Chain
     filters = [];
     let current: AudioNode = masterInput;
     EQ_FREQUENCIES.forEach((freq) => {
@@ -75,207 +67,135 @@ export async function initContext() {
       filters.push(filter);
       current = filter;
     });
-
-    // 3. Reverb Section
     reverbDryGain = audioContext.createGain();
     reverbNode = audioContext.createConvolver();
     reverbNode.buffer = createImpulseResponse(audioContext, 2, 2);
     reverbWetGain = audioContext.createGain();
-
     current.connect(reverbDryGain);
     current.connect(reverbNode);
     reverbNode.connect(reverbWetGain);
-
-    // 4. Output Mixing
     mainGainNode = audioContext.createGain();
     reverbDryGain.connect(mainGainNode);
     reverbWetGain.connect(mainGainNode);
-
     analyzerNode = audioContext.createAnalyser();
     analyzerNode.fftSize = 256;
     mainGainNode.connect(analyzerNode);
     analyzerNode.connect(audioContext.destination);
-
-    // 5. Background / MediaSession Support
     streamDest = audioContext.createMediaStreamDestination();
     analyzerNode.connect(streamDest);
-
     proxyAudio = new Audio();
     proxyAudio.srcObject = streamDest.stream;
     proxyAudio.setAttribute("playsinline", "true");
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     proxyAudio.muted = !isMobile;
     proxyAudio.play().catch(() => { });
-
-    // 6. Streaming Element
     mediaElement = new Audio();
     mediaElement.crossOrigin = "anonymous";
     mediaElement.setAttribute("playsinline", "true");
     mediaSourceNode = audioContext.createMediaElementSource(mediaElement);
     mediaSourceNode.connect(masterInput);
   }
-
-  if (audioContext.state === "suspended") {
-    await audioContext.resume();
-  }
+  if (audioContext.state === "suspended") await audioContext.resume();
   return audioContext;
 }
 
-export function playBuffer(
-  buffer: AudioBuffer,
-  startAt = 0,
-  volume = 0.5,
-  eqGains: number[],
-  reverbDry = 1.0,
-  reverbWet = 0.2
-) {
+export function resumeContext() {
+  if (audioContext && audioContext.state === "suspended") audioContext.resume();
+}
+
+export function suspendContext() {
+  if (audioContext && audioContext.state === "running") audioContext.suspend();
+}
+
+export async function loadAudio(urlOrFile: string | File | Blob): Promise<AudioBuffer> {
+  const ctx = await initContext();
+  if (!ctx) throw new Error("Context failed");
+  let arrayBuffer: ArrayBuffer;
+  if (typeof urlOrFile === "string") {
+    const res = await fetch(urlOrFile);
+    arrayBuffer = await res.arrayBuffer();
+  } else {
+    arrayBuffer = await urlOrFile.arrayBuffer();
+  }
+  return await ctx.decodeAudioData(arrayBuffer);
+}
+
+export function createSampleBuffer(context: AudioContext): AudioBuffer {
+  const duration = 2.0;
+  const sampleRate = context.sampleRate;
+  const buffer = context.createBuffer(1, sampleRate * duration, sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) {
+    data[i] = Math.sin(2 * Math.PI * 440 * i / sampleRate) * Math.exp(-i / (sampleRate * 0.5));
+  }
+  return buffer;
+}
+
+export function playBuffer(buffer: AudioBuffer, startAt = 0, volume = 0.5, eq: number[], rd = 1.0, rw = 0.2) {
   if (!audioContext || !masterInput) return;
-
   immediateStop();
-
   currentBuffer = buffer;
   offsetTime = startAt;
   startTime = audioContext.currentTime;
-
   source = audioContext.createBufferSource();
   source.buffer = buffer;
   source.connect(masterInput);
-
-  // Sync parameters
   setVolume(volume);
-  eqGains.forEach((g, i) => setEqGain(i, g));
-  setReverbDry(reverbDry);
-  setReverbWet(reverbWet);
-
+  eq.forEach((g, i) => setEqGain(i, g));
+  setReverbDry(rd);
+  setReverbWet(rw);
   source.start(0, startAt);
   isPlayingInternal = true;
   playbackMode = 'buffer';
-
-  if ('mediaSession' in navigator) {
-    navigator.mediaSession.playbackState = 'playing';
-    updateMediaMetadata(lastTitle);
-  }
-
-  source.onended = () => {
-    if (playbackMode === 'buffer') {
-      isPlayingInternal = false;
-      if (onPlaybackChange) onPlaybackChange(false);
-    }
-  };
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+  source.onended = () => { if (playbackMode === 'buffer') { isPlayingInternal = false; onPlaybackChange?.(false); } };
 }
 
-export function playStream(
-  url: string,
-  startAt = 0,
-  volume = 0.5,
-  eqGains: number[],
-  reverbDry = 1.0,
-  reverbWet = 0.2
-) {
+export function playStream(url: string, startAt = 0, volume = 0.5, eq: number[], rd = 1.0, rw = 0.2) {
   if (!audioContext || !mediaElement) return;
-
   immediateStop();
-
   currentBuffer = null;
   offsetTime = startAt;
-
-  // Sync parameters
   setVolume(volume);
-  eqGains.forEach((g, i) => setEqGain(i, g));
-  setReverbDry(reverbDry);
-  setReverbWet(reverbWet);
-
+  eq.forEach((g, i) => setEqGain(i, g));
+  setReverbDry(rd);
+  setReverbWet(rw);
   mediaElement.src = url;
   mediaElement.load();
-
-  mediaElement.onloadedmetadata = () => {
-    if (mediaElement) {
-      updateMediaPositionState();
-    }
-  };
-
-  mediaElement.onerror = (e) => {
-    console.error("Stream error occurred", e);
-    isPlayingInternal = false;
-    if (onPlaybackChange) onPlaybackChange(false);
-  };
-
-  mediaElement.play()
-    .then(() => {
-      if (mediaElement && startAt > 0) {
-        mediaElement.currentTime = startAt;
-      }
-    })
-    .catch(e => {
-      console.error("Play failed", e);
-      isPlayingInternal = false;
-      if (onPlaybackChange) onPlaybackChange(false);
-    });
-
+  mediaElement.onloadedmetadata = () => updateMediaPositionState();
+  mediaElement.play().then(() => { if (mediaElement && startAt > 0) mediaElement.currentTime = startAt; }).catch(() => { });
   if (proxyAudio) proxyAudio.play().catch(() => { });
-
   isPlayingInternal = true;
   playbackMode = 'stream';
-
-  if ('mediaSession' in navigator) {
-    navigator.mediaSession.playbackState = 'playing';
-    updateMediaMetadata(lastTitle);
-  }
-
-  mediaElement.onended = () => {
-    isPlayingInternal = false;
-    if (onPlaybackChange) onPlaybackChange(false);
-  };
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+  mediaElement.onended = () => { isPlayingInternal = false; onPlaybackChange?.(false); };
 }
 
 function immediateStop() {
-  if (stopTimeout) {
-    clearTimeout(stopTimeout);
-    stopTimeout = null;
-  }
-  if (source) {
-    try { source.stop(); } catch (e) { }
-    source.disconnect();
-    source = null;
-  }
-  if (mediaElement) {
-    mediaElement.pause();
-    mediaElement.src = "";
-    mediaElement.load();
-  }
+  if (stopTimeout) { clearTimeout(stopTimeout); stopTimeout = null; }
+  if (source) { try { source.stop(); } catch (e) { } source.disconnect(); source = null; }
+  if (mediaElement) { mediaElement.pause(); mediaElement.src = ""; mediaElement.load(); }
   isPlayingInternal = false;
 }
 
 export function stop(fadeTime = 0.1) {
   if (stopTimeout) clearTimeout(stopTimeout);
   isPlayingInternal = false;
-
-  if (mainGainNode && audioContext) {
-    mainGainNode.gain.setTargetAtTime(0, audioContext.currentTime, fadeTime / 4);
-  }
-
-  stopTimeout = setTimeout(() => {
-    immediateStop();
-    playbackMode = 'none';
-  }, fadeTime * 1000);
+  if (mainGainNode && audioContext) mainGainNode.gain.setTargetAtTime(0, audioContext.currentTime, fadeTime / 4);
+  stopTimeout = setTimeout(() => { immediateStop(); playbackMode = 'none'; }, fadeTime * 1000);
 }
 
-export function updateMediaMetadata(title: string, artist = 'EQ LAB', album = 'Audio Library') {
+export function updateMediaMetadata(title: string) {
   lastTitle = title;
   if ('mediaSession' in navigator) {
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title, artist, album,
-      artwork: [{ src: '/favicon.ico', sizes: '128x128', type: 'image/x-icon' }]
-    });
-
-    const handlers: MediaSessionAction[] = ['play', 'pause', 'seekto', 'seekbackward', 'seekforward'];
-    handlers.forEach(action => {
+    navigator.mediaSession.metadata = new MediaMetadata({ title, artist: 'EQ LAB', album: 'Audio Library' });
+    ['play', 'pause', 'seekto', 'seekbackward', 'seekforward'].forEach((action: any) => {
       navigator.mediaSession.setActionHandler(action, (details) => {
         if (action === 'play') onPlaybackChange?.(true);
-        if (action === 'pause') onPlaybackChange?.(false);
-        if (action === 'seekto' && details.seekTime !== undefined) onSeekTo?.(details.seekTime);
-        if (action === 'seekbackward') onSeekTo?.(Math.max(0, getCurrentTime() - 10));
-        if (action === 'seekforward') onSeekTo?.(Math.min(getDuration(), getCurrentTime() + 10));
+        else if (action === 'pause') onPlaybackChange?.(false);
+        else if (action === 'seekto' && details.seekTime !== undefined) onSeekTo?.(details.seekTime);
+        else if (action === 'seekbackward') onSeekTo?.(Math.max(0, getCurrentTime() - 10));
+        else if (action === 'seekforward') onSeekTo?.(Math.min(getDuration(), getCurrentTime() + 10));
       });
     });
   }
@@ -286,47 +206,38 @@ export function updateMediaPositionState() {
     const dur = getDuration();
     const pos = getCurrentTime();
     if (dur > 0 && isFinite(dur) && isFinite(pos)) {
-      try {
-        (navigator.mediaSession as any).setPositionState({
-          duration: dur,
-          playbackRate: 1,
-          position: Math.min(pos, dur)
-        });
-      } catch (e) { }
+      try { (navigator.mediaSession as any).setPositionState({ duration: dur, playbackRate: 1, position: Math.min(pos, dur) }); } catch (e) { }
     }
   }
 }
 
 export async function getSpectrum(buffer: AudioBuffer): Promise<number[]> {
-  const fftSize = 4096;
-  const data = buffer.getChannelData(0);
-  const frequenciesCount = EQ_FREQUENCIES.length;
   const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  const numSamples = Math.min(isMobile ? 15 : 40, Math.floor(buffer.length / fftSize));
-  const skip = Math.floor(buffer.length / numSamples);
-  const spectrum = new Array(frequenciesCount).fill(-100);
+  const fftSize = isMobile ? 2048 : 4096;
+  const data = buffer.getChannelData(0);
   const sampleRate = buffer.sampleRate;
+  const numSamples = isMobile ? 10 : 30;
+  const skip = Math.floor(buffer.length / numSamples);
+  const spectrum = new Array(EQ_FREQUENCIES.length).fill(0);
 
   for (let i = 0; i < numSamples; i++) {
     if (isMobile) await new Promise(r => requestAnimationFrame(r));
     const start = i * skip;
-    for (let fIdx = 0; fIdx < frequenciesCount; fIdx++) {
-      const f = EQ_FREQUENCIES[fIdx];
+    EQ_FREQUENCIES.forEach((f, fIdx) => {
       let real = 0, imag = 0;
       const angle = (2 * Math.PI * f) / sampleRate;
-      const step = isMobile ? 32 : 8;
+      const step = isMobile ? 64 : 16;
       for (let j = 0; j < fftSize; j += step) {
         if (start + j >= data.length) break;
-        const val = data[start + j];
-        real += val * Math.cos(angle * j);
-        imag += val * Math.sin(angle * j);
+        real += data[start + j] * Math.cos(angle * j);
+        imag += data[start + j] * Math.sin(angle * j);
       }
       const mag = Math.sqrt(real * real + imag * imag) / (fftSize / step);
       const db = 20 * Math.log10(mag + 1e-9);
-      spectrum[fIdx] = i === 0 ? db : (spectrum[fIdx] + db) / 2;
-    }
+      spectrum[fIdx] += db;
+    });
   }
-  return spectrum;
+  return spectrum.map(v => v / numSamples);
 }
 
 export function calculateMatchedGains(s: number[], t: number[]) {
@@ -365,9 +276,6 @@ export function getVisualizerData() {
 }
 export function seekTo(t: number, v: number, eq: number[], rd: number, rw: number) {
   offsetTime = t;
-  if (playbackMode === 'stream' && mediaElement) {
-    mediaElement.currentTime = t;
-  } else if (playbackMode === 'buffer' && currentBuffer) {
-    playBuffer(currentBuffer, t, v, eq, rd, rw);
-  }
+  if (playbackMode === 'stream' && mediaElement) mediaElement.currentTime = t;
+  else if (playbackMode === 'buffer' && currentBuffer) playBuffer(currentBuffer, t, v, eq, rd, rw);
 }

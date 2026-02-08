@@ -46,7 +46,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<"library" | "eq" | "matching">("library");
   const [theme, setTheme] = useState<"dark" | "light">("dark");
 
-  const [eqGains, setEqGains] = useState<number[]>(new Array(31).fill(0));
+  const [eqGains, setEqGains] = useState<number[]>(new Array(10).fill(0));
   const [reverbDry, setRevDry] = useState(1.0);
   const [reverbWet, setRevWet] = useState(0.2);
   const [volume, setGlobalVolume] = useState(0.5);
@@ -728,7 +728,7 @@ export default function Home() {
           </div>
 
           <div className="eq-container">
-            <div className="eq-strips pc-only">
+            <div className="eq-strips">
               {EQ_FREQUENCIES.map((freq, i) => (
                 <div key={freq} className="eq-strip">
                   <div style={{ fontSize: "0.6rem", color: "var(--accent)", fontWeight: "bold" }}>{eqGains[i]?.toFixed(1)}</div>

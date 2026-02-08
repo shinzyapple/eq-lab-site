@@ -11,7 +11,7 @@ export const defaultPresets: Preset[] = [
   {
     id: "flat",
     name: "フラット",
-    eqGains: new Array(31).fill(0),
+    eqGains: new Array(10).fill(0),
     reverbDry: 1.0,
     reverbWet: 0,
     volume: 0.5,
@@ -19,12 +19,9 @@ export const defaultPresets: Preset[] = [
   {
     id: "concert-hall",
     name: "コンサートホール",
-    eqGains: [
-      2, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 3, 2, 1, 0, 0, 0, 0, 0
-    ],
-    reverbDry: 0.8,
-    reverbWet: 0.6,
+    eqGains: [1, 2, 1, 0, 0, 0, 1, 2, 3, 2],
+    reverbDry: 0.7,
+    reverbWet: 0.5,
     volume: 0.5,
   },
 ];
-
