@@ -168,7 +168,22 @@ export default function Home() {
           delete (window as any).__lastTrackId;
         }
 
-        console.log(`Library sync complete: ${formattedLocalTracks.length} tracks`);
+        // 2. Load Presets from IndexedDB
+        const localPresets = await db.presets.toArray();
+        const formattedPresets: Preset[] = [
+          ...defaultPresets,
+          ...localPresets.map(p => ({
+            id: p.id!.toString(),
+            name: p.name,
+            eqGains: p.eqGains,
+            reverbDry: p.reverbDry,
+            reverbWet: p.reverbWet,
+            volume: p.volume
+          }))
+        ];
+        setPresets(formattedPresets);
+
+        console.log(`Sync complete: ${formattedLocalTracks.length} tracks, ${localPresets.length} presets`);
       } catch (err) {
         console.error("Local DB fetch error:", err);
       } finally {
