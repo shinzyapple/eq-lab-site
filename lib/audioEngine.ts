@@ -62,7 +62,10 @@ export async function initContext() {
     proxyAudio = new Audio();
     proxyAudio.srcObject = streamDest.stream;
     proxyAudio.setAttribute("playsinline", "true");
-    proxyAudio.muted = false; // iOS requirement for lock screen
+    // Only unmute on mobile to support MediaSession/Background audio.
+    // On desktop, we play via audioContext.destination directly.
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    proxyAudio.muted = !isMobile;
 
     analyzerNode = audioContext.createAnalyser();
     analyzerNode.fftSize = 256;
@@ -231,10 +234,9 @@ export function playBuffer(
   mainGainNode.connect(analyzerNode!);
 
   // PIPE OUTPUT
+  analyzerNode!.connect(audioContext.destination);
   if (streamDest) {
     analyzerNode!.connect(streamDest);
-  } else {
-    analyzerNode!.connect(audioContext.destination);
   }
 
   if (proxyAudio) {
@@ -277,7 +279,11 @@ export function playStream(
   currentBuffer = null;
   offsetTime = startAt;
 
-  // Setup Graph Connection
+  // Clean up previous connections if any
+  if (mediaSourceNode) {
+    try { mediaSourceNode.disconnect(); } catch (e) { }
+  }
+
   filters = [];
   let current: AudioNode = mediaSourceNode;
   EQ_FREQUENCIES.forEach((freq, i) => {
@@ -308,10 +314,10 @@ export function playStream(
   reverbDryGain.connect(mainGainNode);
   reverbWetGain.connect(mainGainNode);
 
+  mainGainNode.connect(analyzerNode!);
+  analyzerNode!.connect(audioContext.destination);
   if (streamDest) {
-    mainGainNode.connect(streamDest);
-  } else {
-    mainGainNode.connect(audioContext.destination);
+    analyzerNode!.connect(streamDest);
   }
 
   mediaElement.src = url;
