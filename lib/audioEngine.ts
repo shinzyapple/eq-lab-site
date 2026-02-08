@@ -90,14 +90,13 @@ export async function initContext() {
 
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     if (isMobile) {
-      // Route through proxyAudio only for background support on mobile
       proxyAudio.muted = false;
     } else {
-      // Route directly for better performance on desktop
       analyzerNode.connect(audioContext.destination);
       proxyAudio.muted = true;
     }
     proxyAudio.play().catch(() => { });
+
     mediaElement = new Audio();
     mediaElement.crossOrigin = "anonymous";
     mediaElement.setAttribute("playsinline", "true");
@@ -156,7 +155,11 @@ export function playBuffer(buffer: AudioBuffer, startAt = 0, volume = 0.5, eq: n
   source.start(0, startAt);
   isPlayingInternal = true;
   playbackMode = 'buffer';
-  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.playbackState = 'playing';
+    updateMediaMetadata(lastTitle);
+    updateMediaPositionState();
+  }
   source.onended = () => { if (playbackMode === 'buffer') { isPlayingInternal = false; onPlaybackChange?.(false); } };
 }
 
@@ -172,11 +175,17 @@ export function playStream(url: string, startAt = 0, volume = 0.5, eq: number[],
   mediaElement.src = url;
   mediaElement.load();
   mediaElement.onloadedmetadata = () => updateMediaPositionState();
-  mediaElement.play().then(() => { if (mediaElement && startAt > 0) mediaElement.currentTime = startAt; }).catch(() => { });
+  mediaElement.play().then(() => {
+    if (mediaElement && startAt > 0) mediaElement.currentTime = startAt;
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = 'playing';
+      updateMediaMetadata(lastTitle);
+      updateMediaPositionState();
+    }
+  }).catch(() => { });
   if (proxyAudio) proxyAudio.play().catch(() => { });
   isPlayingInternal = true;
   playbackMode = 'stream';
-  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
   mediaElement.onended = () => { isPlayingInternal = false; onPlaybackChange?.(false); };
 }
 
@@ -191,6 +200,7 @@ export function stop(fadeTime = 0.1) {
   if (stopTimeout) clearTimeout(stopTimeout);
   isPlayingInternal = false;
   if (mainGainNode && audioContext) mainGainNode.gain.setTargetAtTime(0, audioContext.currentTime, fadeTime / 4);
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
   stopTimeout = setTimeout(() => { immediateStop(); playbackMode = 'none'; }, fadeTime * 1000);
 }
 
@@ -215,7 +225,15 @@ export function updateMediaPositionState() {
     const dur = getDuration();
     const pos = getCurrentTime();
     if (dur > 0 && isFinite(dur) && isFinite(pos)) {
-      try { (navigator.mediaSession as any).setPositionState({ duration: dur, playbackRate: 1, position: Math.min(pos, dur) }); } catch (e) { }
+      try {
+        (navigator.mediaSession as any).setPositionState({
+          duration: dur,
+          playbackRate: 1,
+          position: Math.min(pos, dur)
+        });
+      } catch (e) {
+        console.warn("Position state update failed", e);
+      }
     }
   }
 }
@@ -225,23 +243,23 @@ export async function getSpectrum(buffer: AudioBuffer): Promise<number[]> {
   const fftSize = isMobile ? 2048 : 4096;
   const data = buffer.getChannelData(0);
   const sampleRate = buffer.sampleRate;
-  const numSamples = isMobile ? 10 : 30;
-  const skip = Math.floor(buffer.length / numSamples);
+  const analyzeLimit = Math.min(buffer.length, sampleRate * 30);
+  const numSamples = isMobile ? 15 : 40;
+  const step = Math.floor(analyzeLimit / numSamples);
   const spectrum = new Array(EQ_FREQUENCIES.length).fill(0);
-
   for (let i = 0; i < numSamples; i++) {
-    if (isMobile) await new Promise(r => requestAnimationFrame(r));
-    const start = i * skip;
+    if (isMobile && i % 5 === 0) await new Promise(r => requestAnimationFrame(r));
+    const start = i * step;
     EQ_FREQUENCIES.forEach((f, fIdx) => {
       let real = 0, imag = 0;
       const angle = (2 * Math.PI * f) / sampleRate;
-      const step = isMobile ? 64 : 16;
-      for (let j = 0; j < fftSize; j += step) {
+      const subStep = isMobile ? 32 : 16;
+      for (let j = 0; j < fftSize; j += subStep) {
         if (start + j >= data.length) break;
         real += data[start + j] * Math.cos(angle * j);
         imag += data[start + j] * Math.sin(angle * j);
       }
-      const mag = Math.sqrt(real * real + imag * imag) / (fftSize / step);
+      const mag = Math.sqrt(real * real + imag * imag) / (fftSize / subStep);
       const db = 20 * Math.log10(mag + 1e-9);
       spectrum[fIdx] += db;
     });
@@ -287,4 +305,5 @@ export function seekTo(t: number, v: number, eq: number[], rd: number, rw: numbe
   offsetTime = t;
   if (playbackMode === 'stream' && mediaElement) mediaElement.currentTime = t;
   else if (playbackMode === 'buffer' && currentBuffer) playBuffer(currentBuffer, t, v, eq, rd, rw);
+  if ('mediaSession' in navigator) updateMediaPositionState();
 }

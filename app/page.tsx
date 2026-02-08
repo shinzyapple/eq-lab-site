@@ -743,7 +743,7 @@ export default function Home() {
           </div>
 
           <div className="eq-container">
-            <div className="eq-strips">
+            <div className="eq-strips pc-only">
               {EQ_FREQUENCIES.map((freq, i) => (
                 <div key={freq} className="eq-strip">
                   <div style={{ fontSize: "0.6rem", color: "var(--accent)", fontWeight: "bold" }}>{eqGains[i]?.toFixed(1)}</div>
