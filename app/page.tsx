@@ -512,17 +512,18 @@ export default function Home() {
   const updateActivePreset = (updatedFields: Partial<Preset>) => {
     if (!activePresetId) return;
 
-    const isCustom = !['flat', 'concert-hall', 'rock', 'pop', 'jazz', 'classical'].includes(activePresetId);
+    const DEFAULT_IDS = ['flat', 'concert-hall', 'rock', 'pop', 'jazz', 'classical'];
+    const isCustom = !DEFAULT_IDS.includes(activePresetId);
 
     // 1. Update local state immediately
-    setPresets(prev => prev.map(p => {
+    setPresets((prev: Preset[]) => prev.map((p: Preset) => {
       if (p.id === activePresetId) {
         return { ...p, ...updatedFields };
       }
       return p;
     }));
 
-    // 2. Debounce local DB update
+    // 2. Debounce local DB update for custom presets
     if (isCustom) {
       pendingChangesRef.current = { ...pendingChangesRef.current, ...updatedFields };
 
@@ -548,22 +549,53 @@ export default function Home() {
   };
 
   const savePreset = async () => {
-    const name = prompt("Preset Name", "My Preset");
-    if (!name) return;
+    const DEFAULT_IDS = ['flat', 'concert-hall', 'rock', 'pop', 'jazz', 'classical'];
+    const isCustom = activePresetId && !DEFAULT_IDS.includes(activePresetId);
+    let name = "";
+    let updateExisting = false;
+
+    if (isCustom) {
+      const activePreset = presets.find(p => p.id === activePresetId);
+      const choice = confirm(`現在のプリセット「${activePreset?.name}」を変更内容で上書きしますか？\n(キャンセルで新規別名保存)`);
+      if (choice) {
+        updateExisting = true;
+        name = activePreset?.name || "My Preset";
+      }
+    }
+
+    if (!updateExisting) {
+      const input = prompt("プリセットの名前を入力してください", "My Preset");
+      if (!input) return;
+      name = input;
+    }
 
     try {
-      const id = await db.presets.add({
-        name,
-        eqGains: [...eqGains],
-        reverbDry,
-        reverbWet,
-        volume,
-        createdAt: Date.now()
-      });
+      if (updateExisting && activePresetId) {
+        const changes = {
+          name,
+          eqGains: [...eqGains],
+          reverbDry,
+          reverbWet,
+          volume
+        };
+        await db.presets.update(Number(activePresetId), changes);
+        setPresets((prev: Preset[]) => prev.map((p: Preset) => p.id === activePresetId ? { ...p, ...changes } : p));
+        alert("プリセットを上書き保存しました。");
+      } else {
+        const id = await db.presets.add({
+          name,
+          eqGains: [...eqGains],
+          reverbDry,
+          reverbWet,
+          volume,
+          createdAt: Date.now()
+        });
 
-      const newPreset = { id: id.toString(), name, eqGains: [...eqGains], reverbDry, reverbWet, volume };
-      setPresets(v => [...v, newPreset]);
-      applyPreset(newPreset);
+        const newPreset: Preset = { id: id.toString(), name, eqGains: [...eqGains], reverbDry, reverbWet, volume };
+        setPresets((v: Preset[]) => [...v, newPreset]);
+        applyPreset(newPreset);
+        alert("新しいプリセットとして保存しました。");
+      }
     } catch (err) {
       console.error("Failed to save preset:", err);
       alert("プリセットの保存に失敗しました。");
