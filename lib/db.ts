@@ -13,6 +13,11 @@ export interface PresetData {
     eqGains: number[];
     reverbDry: number;
     reverbWet: number;
+    echoDelay: number;
+    echoFeedback: number;
+    echoWet: number;
+    echoDry: number;
+    isMono: boolean;
     volume: number;
     createdAt: number;
 }
