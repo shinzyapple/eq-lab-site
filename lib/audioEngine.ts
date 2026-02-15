@@ -8,6 +8,11 @@ let filters: BiquadFilterNode[] = [];
 let reverbNode: ConvolverNode | null = null;
 let reverbWetGain: GainNode | null = null;
 let reverbDryGain: GainNode | null = null;
+let echoDelayNode: DelayNode | null = null;
+let echoFeedbackGain: GainNode | null = null;
+let echoWetGain: GainNode | null = null;
+let echoDryGain: GainNode | null = null;
+let monoNode: GainNode | null = null;
 let mainGainNode: GainNode | null = null;
 let analyzerNode: AnalyserNode | null = null;
 let streamDest: MediaStreamAudioDestinationNode | null = null;
@@ -77,9 +82,32 @@ export async function initContext() {
     current.connect(reverbDryGain);
     current.connect(reverbNode);
     reverbNode.connect(reverbWetGain);
+
+    // Echo/Delay Setup
+    echoDelayNode = audioContext.createDelay(5.0);
+    echoFeedbackGain = audioContext.createGain();
+    echoWetGain = audioContext.createGain();
+    echoDryGain = audioContext.createGain();
+
+    // Wire Reverb to Echo input
+    const reverbSum = audioContext.createGain();
+    reverbDryGain.connect(reverbSum);
+    reverbWetGain.connect(reverbSum);
+
+    reverbSum.connect(echoDryGain);
+    reverbSum.connect(echoDelayNode);
+    echoDelayNode.connect(echoFeedbackGain);
+    echoFeedbackGain.connect(echoDelayNode);
+    echoDelayNode.connect(echoWetGain);
+
+    // Mono Setup
+    monoNode = audioContext.createGain();
+    echoDryGain.connect(monoNode);
+    echoWetGain.connect(monoNode);
+
     mainGainNode = audioContext.createGain();
-    reverbDryGain.connect(mainGainNode);
-    reverbWetGain.connect(mainGainNode);
+    monoNode.connect(mainGainNode);
+
     analyzerNode = audioContext.createAnalyser();
     analyzerNode.fftSize = 256;
     mainGainNode.connect(analyzerNode);
@@ -340,6 +368,24 @@ export function setReverbWet(v: number) {
 }
 export function setVolume(v: number) {
   if (mainGainNode && audioContext) mainGainNode.gain.setTargetAtTime(v, audioContext.currentTime, 0.01);
+}
+export function setEchoDelay(v: number) {
+  if (echoDelayNode && audioContext) echoDelayNode.delayTime.setTargetAtTime(v, audioContext.currentTime, 0.01);
+}
+export function setEchoFeedback(v: number) {
+  if (echoFeedbackGain && audioContext) echoFeedbackGain.gain.setTargetAtTime(v, audioContext.currentTime, 0.01);
+}
+export function setEchoWet(v: number) {
+  if (echoWetGain && audioContext) echoWetGain.gain.setTargetAtTime(v, audioContext.currentTime, 0.01);
+}
+export function setEchoDry(v: number) {
+  if (echoDryGain && audioContext) echoDryGain.gain.setTargetAtTime(v, audioContext.currentTime, 0.01);
+}
+export function setMono(enabled: boolean) {
+  if (monoNode) {
+    monoNode.channelCount = enabled ? 1 : 2;
+    monoNode.channelCountMode = "explicit";
+  }
 }
 export function getVisualizerData() {
   if (!analyzerNode) return new Uint8Array(0);

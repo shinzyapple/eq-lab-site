@@ -8,6 +8,11 @@ import {
   setReverbWet,
   setReverbDry,
   setVolume,
+  setEchoDelay,
+  setEchoFeedback,
+  setEchoWet,
+  setEchoDry,
+  setMono,
   EQ_FREQUENCIES,
   loadAudio,
   loadBufferForAnalysis,
@@ -51,6 +56,11 @@ export default function Home() {
   const [eqGains, setEqGains] = useState<number[]>(new Array(10).fill(0));
   const [reverbDry, setRevDry] = useState(1.0);
   const [reverbWet, setRevWet] = useState(0.2);
+  const [echoDelay, setEchoDelayState] = useState(0.3);
+  const [echoFeedback, setEchoFeedbackState] = useState(0.3);
+  const [echoWet, setEchoWetState] = useState(0.0);
+  const [echoDry, setEchoDryState] = useState(1.0);
+  const [isMono, setIsMonoState] = useState(false);
   const [volume, setGlobalVolume] = useState(0.5);
 
   const [isPlaying, setIsPlaying] = useState(false);
@@ -108,100 +118,85 @@ export default function Home() {
     return null;
   };
 
-  // Load all local storage settings once on mount
+  // Load settings on mount
   useEffect(() => {
     const savedSettings = localStorage.getItem("eq-lab-settings");
     if (savedSettings) {
       try {
         const s = JSON.parse(savedSettings);
-        if (s.eqGains) {
-          setEqGains(s.eqGains);
-        }
+        if (s.eqGains) setEqGains(s.eqGains);
         if (s.reverbDry !== undefined) setRevDry(s.reverbDry);
         if (s.reverbWet !== undefined) setRevWet(s.reverbWet);
+        if (s.echoDelay !== undefined) setEchoDelayState(s.echoDelay);
+        if (s.echoFeedback !== undefined) setEchoFeedbackState(s.echoFeedback);
+        if (s.echoWet !== undefined) setEchoWetState(s.echoWet);
+        if (s.echoDry !== undefined) setEchoDryState(s.echoDry);
+        if (s.isMono !== undefined) setIsMonoState(s.isMono);
         if (s.volume !== undefined) setGlobalVolume(s.volume);
         if (s.activePresetId) setActivePresetId(s.activePresetId);
-        if (s.currentTrackId) (window as any).__lastTrackId = s.currentTrackId;
+        if (s.currentTrackId) {
+          db.tracks.get(Number(s.currentTrackId)).then((t: any) => {
+            if (t) setCurrentTrack({ id: t.id.toString(), name: t.name });
+          });
+        }
       } catch (e) {
         console.error("Failed to parse saved settings", e);
       }
     }
+    syncLibrary();
   }, []);
 
   // Update engine whenever basic FX state changes
   useEffect(() => {
+    setEqGain(0, eqGains[0]); // Ensure init
     eqGains.forEach((g, i) => setEqGain(i, g));
     setReverbDry(reverbDry);
     setReverbWet(reverbWet);
+    setEchoDelay(echoDelay);
+    setEchoFeedback(echoFeedback);
+    setEchoWet(echoWet);
+    setEchoDry(echoDry);
+    setMono(isMono);
     setVolume(volume);
-  }, [eqGains, reverbDry, reverbWet, volume]);
+  }, [eqGains, reverbDry, reverbWet, echoDelay, echoFeedback, echoWet, echoDry, isMono, volume]);
 
-  // Separate Effect for Local DB Sync
-  useEffect(() => {
-    let isMounted = true;
+  // syncLibrary function
+  const syncLibrary = async () => {
+    console.log("Starting local library sync...");
+    setIsLoadingLibrary(true);
+    try {
+      const localTracks = await db.tracks.toArray();
+      const formattedLocalTracks: Track[] = localTracks.map((t: any) => ({
+        id: t.id!.toString(),
+        name: t.name,
+      }));
+      setLibrary(formattedLocalTracks);
 
-    const syncLibrary = async () => {
-      console.log("Starting local library sync...");
-      setIsLoadingLibrary(true);
-
-      try {
-        // 1. Load Tracks from IndexedDB
-        const localTracks = await db.tracks.toArray();
-        const formattedLocalTracks: Track[] = localTracks.map(t => ({
-          id: t.id!.toString(),
-          name: t.name,
-        }));
-
-        if (!isMounted) return;
-
-        setLibrary(formattedLocalTracks);
-
-        // Restore last selected track
-        const lastId = (window as any).__lastTrackId;
-        if (lastId) {
-          const matched = formattedLocalTracks.find((t: Track) => t.id === lastId);
-          if (matched) {
-            setCurrentTrack(matched);
-            // Pre-load restored track
-            prepareTrackSource(matched).then(source => {
-              if (source?.buffer) {
-                setDuration(source.buffer.duration);
-                setCurrentTrack({ ...matched, buffer: source.buffer });
-              } else if (source?.url) {
-                // For streams, duration will be set when metadata loads in audioEngine
-                setCurrentTrack(matched);
-              }
-            });
-          }
-          delete (window as any).__lastTrackId;
-        }
-
-        // 2. Load Presets from IndexedDB
-        const localPresets = await db.presets.toArray();
-        const formattedPresets: Preset[] = [
-          ...defaultPresets,
-          ...localPresets.map(p => ({
-            id: p.id!.toString(),
-            name: p.name,
-            eqGains: p.eqGains || new Array(10).fill(0),
-            reverbDry: p.reverbDry ?? 1.0,
-            reverbWet: p.reverbWet ?? 0,
-            volume: p.volume ?? 0.5
-          }))
-        ];
-        setPresets(formattedPresets);
-
-        console.log(`Sync complete: ${formattedLocalTracks.length} tracks, ${localPresets.length} presets`);
-      } catch (err) {
-        console.error("Local DB fetch error:", err);
-      } finally {
-        setIsLoadingLibrary(false);
-      }
-    };
-
-    syncLibrary();
-    return () => { isMounted = false; };
-  }, []);
+      const localPresets = await db.presets.toArray();
+      const formattedPresets: Preset[] = [
+        ...defaultPresets,
+        ...localPresets.map((p: any) => ({
+          id: p.id!.toString(),
+          name: p.name,
+          eqGains: p.eqGains || new Array(10).fill(0),
+          reverbDry: p.reverbDry ?? 1.0,
+          reverbWet: p.reverbWet ?? 0,
+          echoDelay: p.echoDelay ?? 0.3,
+          echoFeedback: p.echoFeedback ?? 0.3,
+          echoWet: p.echoWet ?? 0,
+          echoDry: p.echoDry ?? 1.0,
+          isMono: p.isMono ?? false,
+          volume: p.volume ?? 0.5
+        }))
+      ];
+      setPresets(formattedPresets);
+      console.log(`Sync complete: ${formattedLocalTracks.length} tracks, ${localPresets.length} presets`);
+    } catch (err) {
+      console.error("Local DB fetch error:", err);
+    } finally {
+      setIsLoadingLibrary(false);
+    }
+  };
 
   // Handle currentTrack initialization and synchronization
   useEffect(() => {
@@ -232,11 +227,7 @@ export default function Home() {
   useEffect(() => {
     setAudioEngineCallbacks({
       onPlaybackChange: (playing) => {
-        if (playing) {
-          if (!isPlaying && currentTrack) togglePlay();
-        } else {
-          if (isPlaying) togglePlay();
-        }
+        setIsPlaying(playing);
       },
       onSeekTo: (time) => {
         handleManualSeek(time);
@@ -250,7 +241,7 @@ export default function Home() {
       navigator.mediaSession.setActionHandler('previoustrack', () => playPreviousTrack());
       navigator.mediaSession.setActionHandler('nexttrack', () => playNextTrack());
     }
-  }, [isPlaying, currentTrack, progress, volume, eqGains, reverbDry, reverbWet, library, isShuffle, repeatMode]);
+  }, [library, isShuffle, repeatMode]);
 
   // Update Media Metadata when track changes
   useEffect(() => {
@@ -268,12 +259,17 @@ export default function Home() {
       eqGains,
       reverbDry,
       reverbWet,
+      echoDelay,
+      echoFeedback,
+      echoWet,
+      echoDry,
+      isMono,
       volume,
       activePresetId,
       currentTrackId: currentTrack?.id
     };
     localStorage.setItem("eq-lab-settings", JSON.stringify(settings));
-  }, [eqGains, reverbDry, reverbWet, volume, activePresetId, currentTrack?.id]);
+  }, [eqGains, reverbDry, reverbWet, echoDelay, echoFeedback, echoWet, echoDry, isMono, volume, activePresetId, currentTrack?.id]);
 
   // Progress Loop
   const updateProgress = () => {
@@ -504,6 +500,11 @@ export default function Home() {
     setEqGains([...(p.eqGains || new Array(10).fill(0))]);
     setRevDry(p.reverbDry ?? 1.0);
     setRevWet(p.reverbWet ?? 0);
+    setEchoDelayState(p.echoDelay ?? 0.3);
+    setEchoFeedbackState(p.echoFeedback ?? 0.3);
+    setEchoWetState(p.echoWet ?? 0);
+    setEchoDryState(p.echoDry ?? 1.0);
+    setIsMonoState(p.isMono ?? false);
     setGlobalVolume(p.volume ?? 0.5);
 
     // Engine update is handled by useEffect
@@ -576,6 +577,11 @@ export default function Home() {
           eqGains: [...eqGains],
           reverbDry,
           reverbWet,
+          echoDelay,
+          echoFeedback,
+          echoWet,
+          echoDry,
+          isMono,
           volume
         };
         await db.presets.update(Number(activePresetId), changes);
@@ -587,11 +593,16 @@ export default function Home() {
           eqGains: [...eqGains],
           reverbDry,
           reverbWet,
+          echoDelay,
+          echoFeedback,
+          echoWet,
+          echoDry,
+          isMono,
           volume,
           createdAt: Date.now()
         });
 
-        const newPreset: Preset = { id: id.toString(), name, eqGains: [...eqGains], reverbDry, reverbWet, volume };
+        const newPreset: Preset = { id: id.toString(), name, eqGains: [...eqGains], reverbDry, reverbWet, echoDelay, echoFeedback, echoWet, echoDry, isMono, volume };
         setPresets((v: Preset[]) => [...v, newPreset]);
         applyPreset(newPreset);
         alert("新しいプリセットとして保存しました。");
@@ -696,24 +707,34 @@ export default function Home() {
         eqGains: [...gains],
         reverbDry,
         reverbWet,
+        echoDelay,
+        echoFeedback,
+        echoWet,
+        echoDry,
+        isMono,
         volume,
         createdAt: Date.now()
       });
 
-      const newPreset = {
+      const newPreset: Preset = {
         id: id.toString(),
         name,
         eqGains: [...gains],
         reverbDry,
         reverbWet,
+        echoDelay,
+        echoFeedback,
+        echoWet,
+        echoDry,
+        isMono,
         volume
       };
 
       setPresets(v => [...v, newPreset]);
       applyPreset(newPreset);
-      alert(`プリセット "${name}" を保存しました。`);
-    } catch (e: any) {
-      console.error("Failed to save matched preset:", e);
+      alert(`Matched preset "${name}" saved!`);
+    } catch (err) {
+      console.error("Match save failed:", err);
       alert("プリセットの保存に失敗しました。設定は現在のEQに適用されています。");
     }
   };
@@ -851,30 +872,94 @@ export default function Home() {
               ))}
             </div>
 
-            <div className="fx-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, padding: "24px 0" }}>
-              <div className="fx-box">
-                <label style={{ fontSize: "0.75rem", color: "var(--text-dim)", marginBottom: 8, display: "block" }}>REVERB DRY</label>
-                <input type="range" min="0" max="1" step="0.01" value={reverbDry} onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                  const v = parseFloat(e.target.value);
-                  setRevDry(v); setReverbDry(v);
-                  updateActivePreset({ reverbDry: v });
-                }} style={{ width: "100%" }} />
+            <div className="fx-grid-premium">
+              <div className="fx-section">
+                <div className="section-header">
+                  <span>Reverb</span>
+                  <div className="fx-toggle-placeholder"></div>
+                </div>
+                <div className="fx-controls">
+                  <div className="fx-item">
+                    <label>DRY</label>
+                    <input type="range" min="0" max="1" step="0.01" value={reverbDry} onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                      setRevDry(parseFloat(e.target.value));
+                      updateActivePreset({ reverbDry: parseFloat(e.target.value) });
+                    }} />
+                  </div>
+                  <div className="fx-item">
+                    <label>WET</label>
+                    <input type="range" min="0" max="1" step="0.01" value={reverbWet} onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                      setRevWet(parseFloat(e.target.value));
+                      updateActivePreset({ reverbWet: parseFloat(e.target.value) });
+                    }} />
+                  </div>
+                </div>
               </div>
-              <div className="fx-box">
-                <label style={{ fontSize: "0.75rem", color: "var(--text-dim)", marginBottom: 8, display: "block" }}>REVERB WET</label>
-                <input type="range" min="0" max="1" step="0.01" value={reverbWet} onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                  const v = parseFloat(e.target.value);
-                  setRevWet(v); setReverbWet(v);
-                  updateActivePreset({ reverbWet: v });
-                }} style={{ width: "100%" }} />
+
+              <div className="fx-section">
+                <div className="section-header">
+                  <span>Echo (Delay)</span>
+                </div>
+                <div className="fx-controls">
+                  <div className="fx-item">
+                    <label>TIME</label>
+                    <input type="range" min="0" max="2" step="0.001" value={echoDelay} onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                      setEchoDelayState(parseFloat(e.target.value));
+                      updateActivePreset({ echoDelay: parseFloat(e.target.value) });
+                    }} />
+                  </div>
+                  <div className="fx-item">
+                    <label>FEEDBACK</label>
+                    <input type="range" min="0" max="1" step="0.01" value={echoFeedback} onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                      setEchoFeedbackState(parseFloat(e.target.value));
+                      updateActivePreset({ echoFeedback: parseFloat(e.target.value) });
+                    }} />
+                  </div>
+                  <div className="fx-item">
+                    <label>DRY</label>
+                    <input type="range" min="0" max="1" step="0.01" value={echoDry} onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                      setEchoDryState(parseFloat(e.target.value));
+                      updateActivePreset({ echoDry: parseFloat(e.target.value) });
+                    }} />
+                  </div>
+                  <div className="fx-item">
+                    <label>WET</label>
+                    <input type="range" min="0" max="1" step="0.01" value={echoWet} onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                      setEchoWetState(parseFloat(e.target.value));
+                      updateActivePreset({ echoWet: parseFloat(e.target.value) });
+                    }} />
+                  </div>
+                </div>
               </div>
-              <div className="fx-box" style={{ gridColumn: "span 2" }}>
-                <label style={{ fontSize: "0.75rem", color: "var(--text-dim)", marginBottom: 8, display: "block" }}>OUTPUT GAIN</label>
-                <input type="range" min="0" max="1.5" step="0.01" value={volume} onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                  const v = parseFloat(e.target.value);
-                  setGlobalVolume(v); setVolume(v);
-                  updateActivePreset({ volume: v });
-                }} style={{ width: "100%" }} />
+
+              <div className="fx-section">
+                <div className="section-header">
+                  <span>Output</span>
+                </div>
+                <div className="fx-controls">
+                  <div className="fx-item">
+                    <label>MONO</label>
+                    <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+                      <button
+                        onClick={() => {
+                          const val = !isMono;
+                          setIsMonoState(val);
+                          updateActivePreset({ isMono: val });
+                        }}
+                        style={{ background: isMono ? 'var(--accent)' : 'var(--border)', color: 'white', border: 'none', padding: '4px 12px', borderRadius: 20, fontSize: '0.7rem', cursor: 'pointer', fontWeight: 700 }}
+                      >
+                        {isMono ? "ON" : "OFF"}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="fx-item">
+                    <label>GAIN</label>
+                    <input type="range" min="0" max="1.5" step="0.01" value={volume} onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                      setGlobalVolume(parseFloat(e.target.value));
+                      updateActivePreset({ volume: parseFloat(e.target.value) });
+                    }} />
+                  </div>
+                </div>
               </div>
             </div>
 
