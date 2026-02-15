@@ -72,6 +72,7 @@ export default function Home() {
 
   const requestRef = useRef<number | null>(null);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingChangesRef = useRef<Partial<Preset>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Helper to load buffer if missing
@@ -177,10 +178,10 @@ export default function Home() {
           ...localPresets.map(p => ({
             id: p.id!.toString(),
             name: p.name,
-            eqGains: p.eqGains,
-            reverbDry: p.reverbDry,
-            reverbWet: p.reverbWet,
-            volume: p.volume
+            eqGains: p.eqGains || new Array(10).fill(0),
+            reverbDry: p.reverbDry ?? 1.0,
+            reverbWet: p.reverbWet ?? 0,
+            volume: p.volume ?? 0.5
           }))
         ];
         setPresets(formattedPresets);
@@ -245,28 +246,8 @@ export default function Home() {
     }
   }, [currentTrack]);
 
-  // Sync Presets from Local DB
-  useEffect(() => {
-    setUpdatedAt(new Date().toLocaleString("ja-JP"));
-    const fetchPresets = async () => {
-      try {
-        const localPresets = await db.presets.toArray();
-        const formatted = localPresets.map(p => ({
-          id: p.id!.toString(),
-          name: p.name,
-          eqGains: p.eqGains,
-          reverbDry: p.reverbDry,
-          reverbWet: p.reverbWet,
-          volume: p.volume
-        }));
-
-        setPresets([...defaultPresets, ...formatted]);
-      } catch (err) {
-        console.error("Local preset fetch error:", err);
-      }
-    };
-    fetchPresets();
-  }, []);
+  // No longer needed here as it's handled in the main sync effect or can be unified.
+  // Removal of redundant preset fetch effect.
 
   // Persistence Effect for Settings
   useEffect(() => {
@@ -442,10 +423,10 @@ export default function Home() {
   const applyPreset = async (p: Preset) => {
     await initContext();
     setActivePresetId(p.id);
-    setEqGains([...p.eqGains]);
-    setRevDry(p.reverbDry);
-    setRevWet(p.reverbWet);
-    setGlobalVolume(p.volume);
+    setEqGains([...(p.eqGains || new Array(10).fill(0))]);
+    setRevDry(p.reverbDry ?? 1.0);
+    setRevWet(p.reverbWet ?? 0);
+    setGlobalVolume(p.volume ?? 0.5);
 
     // Engine update is handled by useEffect
   };
@@ -453,7 +434,7 @@ export default function Home() {
   const updateActivePreset = (updatedFields: Partial<Preset>) => {
     if (!activePresetId) return;
 
-    const isCustom = !['flat', 'concert-hall'].includes(activePresetId);
+    const isCustom = !['flat', 'concert-hall', 'rock', 'pop', 'jazz', 'classical'].includes(activePresetId);
 
     // 1. Update local state immediately
     setPresets(prev => prev.map(p => {
@@ -465,16 +446,16 @@ export default function Home() {
 
     // 2. Debounce local DB update
     if (isCustom) {
+      pendingChangesRef.current = { ...pendingChangesRef.current, ...updatedFields };
+
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = setTimeout(async () => {
-        console.log("Syncing preset to local DB...", activePresetId);
+        const changes = { ...pendingChangesRef.current };
+        pendingChangesRef.current = {};
+
+        console.log("Syncing preset to local DB...", activePresetId, changes);
         try {
-          await db.presets.update(Number(activePresetId), {
-            eqGains: updatedFields.eqGains || undefined,
-            reverbDry: updatedFields.reverbDry,
-            reverbWet: updatedFields.reverbWet,
-            volume: updatedFields.volume
-          });
+          await db.presets.update(Number(activePresetId), changes);
         } catch (err) {
           console.error("Local DB preset update failed:", err);
         }
