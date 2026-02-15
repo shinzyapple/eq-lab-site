@@ -929,8 +929,8 @@ export default function Home() {
           <input
             type="range" min="0" max={duration || 1} step="0.01" value={progress}
             onClick={(e: React.MouseEvent) => e.stopPropagation()}
-            onInput={(e: React.ChangeEvent<HTMLInputElement>) => { setIsDragging(true); setProgress(parseFloat((e.target as any).value)); }}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setIsDragging(false); handleManualSeek(parseFloat((e.target as any).value)); }}
+            onInput={(e: React.FormEvent<HTMLInputElement>) => { setIsDragging(true); setProgress(parseFloat(e.currentTarget.value)); }}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setIsDragging(false); handleManualSeek(parseFloat(e.target.value)); }}
             style={{ width: "100%", cursor: "pointer" }}
           />
         </div>
@@ -958,8 +958,8 @@ export default function Home() {
             <div style={{ marginBottom: 32 }}>
               <input
                 type="range" min="0" max={duration || 1} step="0.01" value={progress}
-                onInput={(e: React.ChangeEvent<HTMLInputElement>) => { setIsDragging(true); setProgress(parseFloat((e.target as any).value)); }}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setIsDragging(false); handleManualSeek(parseFloat((e.target as any).value)); }}
+                onInput={(e: React.FormEvent<HTMLInputElement>) => { setIsDragging(true); setProgress(parseFloat(e.currentTarget.value)); }}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setIsDragging(false); handleManualSeek(parseFloat(e.target.value)); }}
                 style={{ width: "100%", height: 6, borderRadius: 3, background: "var(--border)" }}
               />
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: 12, fontSize: "0.85rem", color: "var(--text-dim)" }}>
