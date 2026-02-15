@@ -17,7 +17,6 @@ export interface PresetData {
     echoFeedback: number;
     echoWet: number;
     echoDry: number;
-    isMono: boolean;
     volume: number;
     createdAt: number;
 }

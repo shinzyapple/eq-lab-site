@@ -12,7 +12,6 @@ import {
   setEchoFeedback,
   setEchoWet,
   setEchoDry,
-  setMono,
   EQ_FREQUENCIES,
   loadAudio,
   loadBufferForAnalysis,
@@ -60,7 +59,6 @@ export default function Home() {
   const [echoFeedback, setEchoFeedbackState] = useState(0.3);
   const [echoWet, setEchoWetState] = useState(0.0);
   const [echoDry, setEchoDryState] = useState(1.0);
-  const [isMono, setIsMonoState] = useState(false);
   const [volume, setGlobalVolume] = useState(0.5);
 
   const [isPlaying, setIsPlaying] = useState(false);
@@ -131,7 +129,6 @@ export default function Home() {
         if (s.echoFeedback !== undefined) setEchoFeedbackState(s.echoFeedback);
         if (s.echoWet !== undefined) setEchoWetState(s.echoWet);
         if (s.echoDry !== undefined) setEchoDryState(s.echoDry);
-        if (s.isMono !== undefined) setIsMonoState(s.isMono);
         if (s.volume !== undefined) setGlobalVolume(s.volume);
         if (s.activePresetId) setActivePresetId(s.activePresetId);
         if (s.currentTrackId) {
@@ -156,9 +153,8 @@ export default function Home() {
     setEchoFeedback(echoFeedback);
     setEchoWet(echoWet);
     setEchoDry(echoDry);
-    setMono(isMono);
     setVolume(volume);
-  }, [eqGains, reverbDry, reverbWet, echoDelay, echoFeedback, echoWet, echoDry, isMono, volume]);
+  }, [eqGains, reverbDry, reverbWet, echoDelay, echoFeedback, echoWet, echoDry, volume]);
 
   // syncLibrary function
   const syncLibrary = async () => {
@@ -185,7 +181,6 @@ export default function Home() {
           echoFeedback: p.echoFeedback ?? 0.3,
           echoWet: p.echoWet ?? 0,
           echoDry: p.echoDry ?? 1.0,
-          isMono: p.isMono ?? false,
           volume: p.volume ?? 0.5
         }))
       ];
@@ -263,13 +258,12 @@ export default function Home() {
       echoFeedback,
       echoWet,
       echoDry,
-      isMono,
       volume,
       activePresetId,
       currentTrackId: currentTrack?.id
     };
     localStorage.setItem("eq-lab-settings", JSON.stringify(settings));
-  }, [eqGains, reverbDry, reverbWet, echoDelay, echoFeedback, echoWet, echoDry, isMono, volume, activePresetId, currentTrack?.id]);
+  }, [eqGains, reverbDry, reverbWet, echoDelay, echoFeedback, echoWet, echoDry, volume, activePresetId, currentTrack?.id]);
 
   // Progress Loop
   const updateProgress = () => {
@@ -504,7 +498,6 @@ export default function Home() {
     setEchoFeedbackState(p.echoFeedback ?? 0.3);
     setEchoWetState(p.echoWet ?? 0);
     setEchoDryState(p.echoDry ?? 1.0);
-    setIsMonoState(p.isMono ?? false);
     setGlobalVolume(p.volume ?? 0.5);
 
     // Engine update is handled by useEffect
@@ -581,7 +574,6 @@ export default function Home() {
           echoFeedback,
           echoWet,
           echoDry,
-          isMono,
           volume
         };
         await db.presets.update(Number(activePresetId), changes);
@@ -597,12 +589,11 @@ export default function Home() {
           echoFeedback,
           echoWet,
           echoDry,
-          isMono,
           volume,
           createdAt: Date.now()
         });
 
-        const newPreset: Preset = { id: id.toString(), name, eqGains: [...eqGains], reverbDry, reverbWet, echoDelay, echoFeedback, echoWet, echoDry, isMono, volume };
+        const newPreset: Preset = { id: id.toString(), name, eqGains: [...eqGains], reverbDry, reverbWet, echoDelay, echoFeedback, echoWet, echoDry, volume };
         setPresets((v: Preset[]) => [...v, newPreset]);
         applyPreset(newPreset);
         alert("新しいプリセットとして保存しました。");
@@ -711,7 +702,6 @@ export default function Home() {
         echoFeedback,
         echoWet,
         echoDry,
-        isMono,
         volume,
         createdAt: Date.now()
       });
@@ -726,7 +716,6 @@ export default function Home() {
         echoFeedback,
         echoWet,
         echoDry,
-        isMono,
         volume
       };
 
@@ -937,21 +926,6 @@ export default function Home() {
                   <span>Output</span>
                 </div>
                 <div className="fx-controls">
-                  <div className="fx-item">
-                    <label>MONO</label>
-                    <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-                      <button
-                        onClick={() => {
-                          const val = !isMono;
-                          setIsMonoState(val);
-                          updateActivePreset({ isMono: val });
-                        }}
-                        style={{ background: isMono ? 'var(--accent)' : 'var(--border)', color: 'white', border: 'none', padding: '4px 12px', borderRadius: 20, fontSize: '0.7rem', cursor: 'pointer', fontWeight: 700 }}
-                      >
-                        {isMono ? "ON" : "OFF"}
-                      </button>
-                    </div>
-                  </div>
                   <div className="fx-item">
                     <label>GAIN</label>
                     <input type="range" min="0" max="1.5" step="0.01" value={volume} onChange={(e: React.ChangeEvent<HTMLInputElement>) => {

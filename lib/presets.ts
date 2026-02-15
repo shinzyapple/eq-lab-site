@@ -8,7 +8,6 @@ export type Preset = {
   echoFeedback: number;
   echoWet: number;
   echoDry: number;
-  isMono: boolean;
   volume: number;
 };
 
@@ -23,7 +22,6 @@ export const defaultPresets: Preset[] = [
     echoFeedback: 0.3,
     echoWet: 0,
     echoDry: 1.0,
-    isMono: false,
     volume: 0.5,
   },
   {
@@ -36,7 +34,6 @@ export const defaultPresets: Preset[] = [
     echoFeedback: 0.4,
     echoWet: 0.2,
     echoDry: 1.0,
-    isMono: false,
     volume: 0.5,
   },
 ];
