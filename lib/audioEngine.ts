@@ -100,8 +100,10 @@ export async function initContext() {
     echoFeedbackGain.connect(echoDelayNode);
     echoDelayNode.connect(echoWetGain);
 
-    // Mono Setup
+    // Mono / Channel Downmixer Setup
+    // Use a specific downmix gain node to ensure sum of channels doesn't clip
     monoNode = audioContext.createGain();
+
     echoDryGain.connect(monoNode);
     echoWetGain.connect(monoNode);
 
@@ -383,8 +385,14 @@ export function setEchoDry(v: number) {
 }
 export function setMono(enabled: boolean) {
   if (monoNode) {
+    // When mono is enabled, we set channelCount to 1. 
+    // This forces the Web Audio API to downmix everything arriving at this node to 1 channel.
+    // When disabled, we return to 2 channels (stereo).
     monoNode.channelCount = enabled ? 1 : 2;
+    // 'explicit' means we want exactly the number of channels specified in channelCount.
     monoNode.channelCountMode = "explicit";
+    // 'speakers' ensures that if the output is mono, it's distributed evenly to L and R.
+    monoNode.channelInterpretation = "speakers";
   }
 }
 export function getVisualizerData() {
