@@ -75,21 +75,28 @@ export async function initContext() {
       current = filter;
     });
     reverbDryGain = audioContext.createGain();
+    reverbDryGain.gain.value = 1.0;
     reverbNode = audioContext.createConvolver();
     reverbNode.buffer = createImpulseResponse(audioContext, 2, 2);
     reverbWetGain = audioContext.createGain();
+    reverbWetGain.gain.value = 0.0;
     current.connect(reverbDryGain);
     current.connect(reverbNode);
     reverbNode.connect(reverbWetGain);
 
     // Echo/Delay Setup
     echoDelayNode = audioContext.createDelay(5.0);
+    echoDelayNode.delayTime.value = 0.3;
     echoFeedbackGain = audioContext.createGain();
+    echoFeedbackGain.gain.value = 0.0; // Prevent feedback oscillation loop
     echoWetGain = audioContext.createGain();
+    echoWetGain.gain.value = 0.0;
     echoDryGain = audioContext.createGain();
+    echoDryGain.gain.value = 1.0;
 
     // Wire Reverb to Echo input
     const reverbSum = audioContext.createGain();
+    reverbSum.gain.value = 1.0;
     reverbDryGain.connect(reverbSum);
     reverbWetGain.connect(reverbSum);
 
@@ -100,6 +107,7 @@ export async function initContext() {
     echoDelayNode.connect(echoWetGain);
 
     mainGainNode = audioContext.createGain();
+    mainGainNode.gain.value = 0.5;
     echoDryGain.connect(mainGainNode);
     echoWetGain.connect(mainGainNode);
 
