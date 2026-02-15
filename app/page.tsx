@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   playBuffer,
   stop,
@@ -63,6 +63,11 @@ export default function Home() {
   const [isMatching, setIsMatching] = useState(false);
   const [sourceTrack, setSourceTrack] = useState<Track | null>(null);
   const [targetTrack, setTargetTrack] = useState<Track | null>(null);
+
+  // New Playlist & Control states
+  const [repeatMode, setRepeatMode] = useState<'none' | 'all' | 'one'>('none');
+  const [isShuffle, setIsShuffle] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<string>("");
@@ -235,9 +240,17 @@ export default function Home() {
       },
       onSeekTo: (time) => {
         handleManualSeek(time);
+      },
+      onTrackEnd: () => {
+        playNextTrack();
       }
     });
-  }, [isPlaying, currentTrack, progress, volume, eqGains, reverbDry, reverbWet]);
+
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.setActionHandler('previoustrack', () => playPreviousTrack());
+      navigator.mediaSession.setActionHandler('nexttrack', () => playNextTrack());
+    }
+  }, [isPlaying, currentTrack, progress, volume, eqGains, reverbDry, reverbWet, library, isShuffle, repeatMode]);
 
   // Update Media Metadata when track changes
   useEffect(() => {
@@ -399,6 +412,71 @@ export default function Home() {
   const handleManualSeek = async (time: number) => {
     setProgress(time);
     seekTo(time, volume, eqGains, reverbDry, reverbWet);
+  };
+
+  const handleTrackSelect = async (track: Track, shouldPlay = true) => {
+    await initContext();
+    setCurrentTrack(track);
+    setProgress(0);
+    const source = await prepareTrackSource(track);
+    if (source?.buffer) {
+      setDuration(source.buffer.duration);
+      const updatedTrack = { ...track, buffer: source.buffer };
+      setCurrentTrack(updatedTrack);
+      if (shouldPlay) {
+        playBuffer(source.buffer, 0, volume, eqGains, reverbDry, reverbWet);
+        setIsPlaying(true);
+      }
+      setLibrary((prev: Track[]) => prev.map((t: Track) => t.id === track.id ? updatedTrack : t));
+    } else if (source?.url) {
+      setCurrentTrack(track);
+      if (shouldPlay) {
+        playStream(source.url, 0, volume, eqGains, reverbDry, reverbWet);
+        setIsPlaying(true);
+      }
+    }
+  };
+
+  const playNextTrack = () => {
+    if (library.length === 0) return;
+    if (repeatMode === "one" && currentTrack) {
+      handleManualSeek(0);
+      return;
+    }
+
+    const currentIndex = library.findIndex((t: Track) => t.id === currentTrack?.id);
+    let nextIndex = 0;
+
+    if (isShuffle) {
+      nextIndex = Math.floor(Math.random() * library.length);
+      if (nextIndex === currentIndex && library.length > 1) {
+        nextIndex = (nextIndex + 1) % library.length;
+      }
+    } else {
+      nextIndex = currentIndex + 1;
+      if (nextIndex >= library.length) {
+        if (repeatMode === "all") nextIndex = 0;
+        else return; // Stop at end
+      }
+    }
+    handleTrackSelect(library[nextIndex], isPlaying);
+  };
+
+  const playPreviousTrack = () => {
+    if (library.length === 0) return;
+    const currentIndex = library.findIndex((t: Track) => t.id === currentTrack?.id);
+    let nextIndex = 0;
+
+    if (isShuffle) {
+      nextIndex = Math.floor(Math.random() * library.length);
+    } else {
+      nextIndex = currentIndex - 1;
+      if (nextIndex < 0) {
+        if (repeatMode === "all") nextIndex = library.length - 1;
+        else nextIndex = 0;
+      }
+    }
+    handleTrackSelect(library[nextIndex], isPlaying);
   };
 
   const deleteTrack = async (id: string, e: React.MouseEvent) => {
@@ -610,33 +688,48 @@ export default function Home() {
 
   // Visualizer Ref
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const expandedCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
-    if (!isPlaying || !canvasRef.current) return;
+    if (!isPlaying) return;
 
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    const expandedCanvas = expandedCanvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    const eCtx = expandedCanvas?.getContext("2d");
 
     let animId: number;
     const render = () => {
       const visData = getVisualizerData();
 
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const barWidth = (canvas.width / visData.length) * 2.5;
-      let x = 0;
+      if (ctx && canvas) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const barWidth = (canvas.width / visData.length) * 2.5;
+        let x = 0;
+        for (let i = 0; i < visData.length; i++) {
+          const barHeight = (visData[i] / 255) * canvas.height;
+          ctx.fillStyle = `rgba(139, 92, 246, ${visData[i] / 255})`;
+          ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+          x += barWidth + 1;
+        }
+      }
 
-      for (let i = 0; i < visData.length; i++) {
-        const barHeight = (visData[i] / 255) * canvas.height;
-        ctx.fillStyle = `rgba(139, 92, 246, ${visData[i] / 255})`;
-        ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
-        x += barWidth + 1;
+      if (eCtx && expandedCanvas) {
+        eCtx.clearRect(0, 0, expandedCanvas.width, expandedCanvas.height);
+        const barWidth = (expandedCanvas.width / visData.length) * 2.5;
+        let x = 0;
+        for (let i = 0; i < visData.length; i++) {
+          const barHeight = (visData[i] / 255) * expandedCanvas.height;
+          eCtx.fillStyle = `rgba(255, 255, 255, ${visData[i] / 512})`;
+          eCtx.fillRect(x, expandedCanvas.height - barHeight, barWidth, barHeight);
+          x += barWidth + 1;
+        }
       }
       animId = requestAnimationFrame(render);
     };
     render();
     return () => cancelAnimationFrame(animId);
-  }, [isPlaying]);
+  }, [isPlaying, isExpanded]);
 
   return (
     <main className={`main-layout ${theme === "light" ? "light-theme" : ""}`} data-active-tab={activeTab}>
@@ -691,26 +784,7 @@ export default function Home() {
             {library.map((track) => (
               <div
                 key={track.id}
-                onClick={async () => {
-                  await initContext();
-                  setCurrentTrack(track);
-                  setProgress(0);
-                  const source = await prepareTrackSource(track);
-                  if (source?.buffer) {
-                    setDuration(source.buffer.duration);
-                    const updatedTrack = { ...track, buffer: source.buffer };
-                    setCurrentTrack(updatedTrack);
-                    if (isPlaying) {
-                      playBuffer(source.buffer, 0, volume, eqGains, reverbDry, reverbWet);
-                    }
-                    setLibrary(prev => prev.map(t => t.id === track.id ? updatedTrack : t));
-                  } else if (source?.url) {
-                    setCurrentTrack(track);
-                    if (isPlaying) {
-                      playStream(source.url, 0, volume, eqGains, reverbDry, reverbWet);
-                    }
-                  }
-                }}
+                onClick={() => handleTrackSelect(track, isPlaying)}
                 className={`track-item ${currentTrack?.id === track.id ? "active" : ""}`}
               >
                 <div style={{ overflow: "hidden" }}>
@@ -738,7 +812,7 @@ export default function Home() {
                 <div key={freq} className="eq-strip">
                   <div style={{ fontSize: "0.6rem", color: "var(--accent)", fontWeight: "bold" }}>{eqGains[i]?.toFixed(1)}</div>
                   <div className="slider-vertical">
-                    <input type="range" min="-12" max="12" step="0.1" value={eqGains[i] || 0} onChange={e => handleEqChange(i, parseFloat(e.target.value))} />
+                    <input type="range" min="-12" max="12" step="0.1" value={eqGains[i] || 0} onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleEqChange(i, parseFloat(e.target.value))} />
                   </div>
                   <div className="freq-label">{freq < 1000 ? freq : `${freq / 1000}k`}</div>
                 </div>
@@ -748,7 +822,7 @@ export default function Home() {
             <div className="fx-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, padding: "24px 0" }}>
               <div className="fx-box">
                 <label style={{ fontSize: "0.75rem", color: "var(--text-dim)", marginBottom: 8, display: "block" }}>REVERB DRY</label>
-                <input type="range" min="0" max="1" step="0.01" value={reverbDry} onChange={e => {
+                <input type="range" min="0" max="1" step="0.01" value={reverbDry} onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                   const v = parseFloat(e.target.value);
                   setRevDry(v); setReverbDry(v);
                   updateActivePreset({ reverbDry: v });
@@ -756,7 +830,7 @@ export default function Home() {
               </div>
               <div className="fx-box">
                 <label style={{ fontSize: "0.75rem", color: "var(--text-dim)", marginBottom: 8, display: "block" }}>REVERB WET</label>
-                <input type="range" min="0" max="1" step="0.01" value={reverbWet} onChange={e => {
+                <input type="range" min="0" max="1" step="0.01" value={reverbWet} onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                   const v = parseFloat(e.target.value);
                   setRevWet(v); setReverbWet(v);
                   updateActivePreset({ reverbWet: v });
@@ -764,7 +838,7 @@ export default function Home() {
               </div>
               <div className="fx-box" style={{ gridColumn: "span 2" }}>
                 <label style={{ fontSize: "0.75rem", color: "var(--text-dim)", marginBottom: 8, display: "block" }}>OUTPUT GAIN</label>
-                <input type="range" min="0" max="1.5" step="0.01" value={volume} onChange={e => {
+                <input type="range" min="0" max="1.5" step="0.01" value={volume} onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                   const v = parseFloat(e.target.value);
                   setGlobalVolume(v); setVolume(v);
                   updateActivePreset({ volume: v });
@@ -775,11 +849,11 @@ export default function Home() {
             <div style={{ marginTop: 24 }}>
               <h3 className="section-title" style={{ marginBottom: 16 }}>Presets</h3>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                {presets.map(p => (
+                {presets.map((p: Preset) => (
                   <div key={p.id} onClick={() => applyPreset(p)} className={`preset-item ${activePresetId === p.id ? "active-preset" : ""}`} style={{ padding: 12, borderRadius: 12, border: "1px solid var(--border)", cursor: "pointer", background: activePresetId === p.id ? "rgba(139, 92, 246, 0.1)" : "var(--hover)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <span style={{ fontSize: "0.85rem", fontWeight: activePresetId === p.id ? 600 : 400 }}>{p.name}</span>
                     {(p.id !== 'flat' && p.id !== 'concert-hall') && (
-                      <button onClick={e => deletePreset(p.id, e)} style={{ background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer" }}>×</button>
+                      <button onClick={(e: React.MouseEvent) => deletePreset(p.id, e)} style={{ background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer" }}>×</button>
                     )}
                   </div>
                 ))}
@@ -803,7 +877,7 @@ export default function Home() {
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <div style={{ fontWeight: 600, fontSize: "0.9rem", flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{targetTrack?.name || "Load file..."}</div>
                 <label className="btn-s" style={{ background: "var(--border)", padding: "4px 10px", borderRadius: 6, fontSize: "0.75rem", cursor: "pointer" }}>
-                  Pick <input type="file" accept="audio/*,audio/x-caf,audio/caf,audio/x-m4a,audio/mp3,audio/wav,.caf,.mp3,.wav,.m4a" hidden onChange={e => handleFileUpload(e, "target")} />
+                  Pick <input type="file" accept="audio/*,audio/x-caf,audio/caf,audio/x-m4a,audio/mp3,audio/wav,.caf,.mp3,.wav,.m4a" hidden onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleFileUpload(e, "target")} />
                 </label>
               </div>
             </div>
@@ -819,31 +893,110 @@ export default function Home() {
         </aside>
       </div>
 
-      <footer className="player-bar">
-        <button onClick={togglePlay} className={`play-btn ${isBuffering ? "buffering" : ""}`} disabled={isBuffering}>
+      <footer className="player-bar" onClick={(e: React.MouseEvent) => {
+        if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'BUTTON') return;
+        setIsExpanded(true);
+      }}>
+        <div className="pc-only" style={{ display: "flex", gap: 8 }}>
+          <button className="control-icon" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setIsShuffle(!isShuffle); }} style={{ color: isShuffle ? "var(--accent)" : "inherit" }}>🔀</button>
+          <button className="control-icon" onClick={(e: React.MouseEvent) => { e.stopPropagation(); playPreviousTrack(); }}>⏮</button>
+        </div>
+
+        <button onClick={(e: React.MouseEvent) => { e.stopPropagation(); togglePlay(); }} className={`play-btn ${isBuffering ? "buffering" : ""}`} disabled={isBuffering}>
           {isBuffering ? "..." : (isPlaying ? "Ⅱ" : "▶")}
         </button>
 
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+        <div className="pc-only" style={{ display: "flex", gap: 8 }}>
+          <button className="control-icon" onClick={(e: React.MouseEvent) => { e.stopPropagation(); playNextTrack(); }}>⏭</button>
+          <button className="control-icon" onClick={(e: React.MouseEvent) => {
+            e.stopPropagation();
+            setRepeatMode((curr: string) => curr === 'none' ? 'all' : curr === 'all' ? 'one' : 'none');
+          }} style={{ color: repeatMode !== 'none' ? "var(--accent)" : "inherit" }}>
+            {repeatMode === 'one' ? '🔂' : '🔁'}
+          </button>
+        </div>
+
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
-            <div style={{ overflow: "hidden" }}>
-              <div style={{ fontWeight: 700, fontSize: "1rem", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{currentTrack?.name || "No track selected"}</div>
-              <div style={{ fontSize: "0.75rem", color: "var(--text-dim)" }}>{isBuffering ? "Decoding audio..." : (isPlaying ? "Playing locally" : "Ready")}</div>
+            <div style={{ overflow: "hidden", cursor: "pointer" }}>
+              <div style={{ fontWeight: 700, fontSize: "0.95rem", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{currentTrack?.name || "No track selected"}</div>
+              <div style={{ fontSize: "0.7rem", color: "var(--text-dim)" }}>{isBuffering ? "Decoding..." : (isPlaying ? "Playing" : "Ready")}</div>
             </div>
-            <div style={{ fontSize: "0.85rem", fontFamily: "monospace", color: "var(--text-dim)" }}>
+            <div style={{ fontSize: "0.8rem", fontFamily: "monospace", color: "var(--text-dim)" }}>
               {formatTime(progress)} / {formatTime(duration)}
             </div>
           </div>
           <input
             type="range" min="0" max={duration || 1} step="0.01" value={progress}
-            onInput={(e) => { setIsDragging(true); setProgress(parseFloat((e.target as any).value)); }}
-            onChange={(e) => { setIsDragging(false); handleManualSeek(parseFloat((e.target as any).value)); }}
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+            onInput={(e: React.ChangeEvent<HTMLInputElement>) => { setIsDragging(true); setProgress(parseFloat((e.target as any).value)); }}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setIsDragging(false); handleManualSeek(parseFloat((e.target as any).value)); }}
             style={{ width: "100%", cursor: "pointer" }}
           />
         </div>
-
-        <canvas ref={canvasRef} width="160" height="40" style={{ opacity: isPlaying ? 0.8 : 0.2, transition: "0.3s" }} className="pc-only" />
       </footer>
+
+      {isExpanded && (
+        <div className="expanded-player">
+          <div className="expanded-header">
+            <button className="close-btn" onClick={() => setIsExpanded(false)}>↓</button>
+            <div className="expanded-subtitle">NOW PLAYING</div>
+            <button className="close-btn" onClick={() => setIsExpanded(false)} style={{ opacity: 0 }}>↓</button>
+          </div>
+
+          <div className="expanded-art">
+            <div style={{ fontSize: "5rem" }}>🎵</div>
+            <canvas ref={expandedCanvasRef} width="400" height="400" style={{ position: "absolute", inset: 0, opacity: 0.6 }} />
+          </div>
+
+          <div className="expanded-info">
+            <h2 className="expanded-title">{currentTrack?.name || "No Track"}</h2>
+            <p className="expanded-subtitle">EQ LAB PREMIUM PLAYER</p>
+          </div>
+
+          <div className="expanded-controls">
+            <div style={{ marginBottom: 32 }}>
+              <input
+                type="range" min="0" max={duration || 1} step="0.01" value={progress}
+                onInput={(e: React.ChangeEvent<HTMLInputElement>) => { setIsDragging(true); setProgress(parseFloat((e.target as any).value)); }}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setIsDragging(false); handleManualSeek(parseFloat((e.target as any).value)); }}
+                style={{ width: "100%", height: 6, borderRadius: 3, background: "var(--border)" }}
+              />
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 12, fontSize: "0.85rem", color: "var(--text-dim)" }}>
+                <span>{formatTime(progress)}</span>
+                <span>{formatTime(duration)}</span>
+              </div>
+            </div>
+
+            <div className="expanded-main-controls">
+              <button className="control-icon" style={{ fontSize: "1.5rem", color: isShuffle ? "var(--accent)" : "inherit" }} onClick={() => setIsShuffle(!isShuffle)}>🔀</button>
+              <button className="expanded-prev-next" onClick={playPreviousTrack}>⏮</button>
+              <button className="expanded-play-btn" onClick={togglePlay}>
+                {isPlaying ? "Ⅱ" : "▶"}
+              </button>
+              <button className="expanded-prev-next" onClick={playNextTrack}>⏭</button>
+              <button className="control-icon" style={{ fontSize: "1.5rem", color: repeatMode !== 'none' ? "var(--accent)" : "inherit" }} onClick={() => setRepeatMode((curr: string) => curr === 'none' ? 'all' : curr === 'all' ? 'one' : 'none')}>
+                {repeatMode === 'one' ? '🔂' : '🔁'}
+              </button>
+            </div>
+          </div>
+
+          <div className="playlist-drawer">
+            <div className="playlist-header">
+              <h3 style={{ fontSize: "1.1rem" }}>Next in Line</h3>
+              <span style={{ fontSize: "0.85rem", color: "var(--text-dim)" }}>{library.length} tracks</span>
+            </div>
+            {library.map((t: Track) => (
+              <div key={t.id} onClick={() => handleTrackSelect(t, true)} className={`track-item ${currentTrack?.id === t.id ? "active" : ""}`}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ width: 32, height: 32, background: "var(--glass)", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.8rem" }}>{currentTrack?.id === t.id ? "▶" : "🎵"}</div>
+                  <div style={{ fontWeight: 500 }}>{t.name}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <nav className="mobile-only" style={{ position: "fixed", bottom: 0, width: "100%", height: 64, display: "flex", background: "var(--p-bg)", borderTop: "1px solid var(--border)", zIndex: 2000 }}>
         {["library", "eq", "matching"].map((tab) => (

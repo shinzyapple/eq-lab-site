@@ -18,20 +18,23 @@ let masterInput: GainNode | null = null;
 
 let onPlaybackChange: ((playing: boolean) => void) | null = null;
 let onSeekTo: ((time: number) => void) | null = null;
+let onTrackEnd: (() => void) | null = null;
 
 export function setAudioEngineCallbacks(callbacks: {
   onPlaybackChange?: (playing: boolean) => void;
   onSeekTo?: (time: number) => void;
+  onTrackEnd?: () => void;
 }) {
   if (callbacks.onPlaybackChange) onPlaybackChange = callbacks.onPlaybackChange;
   if (callbacks.onSeekTo) onSeekTo = callbacks.onSeekTo;
+  if (callbacks.onTrackEnd) onTrackEnd = callbacks.onTrackEnd;
 }
 
 let currentBuffer: AudioBuffer | null = null;
 let startTime = 0;
 let offsetTime = 0;
 let isPlayingInternal = false;
-let stopTimeout: NodeJS.Timeout | null = null;
+let stopTimeout: any = null;
 let lastTitle = 'Unknown Track';
 let playbackMode: 'buffer' | 'stream' | 'none' = 'none';
 
@@ -187,7 +190,13 @@ export function playBuffer(buffer: AudioBuffer, startAt = 0, volume = 0.5, eq: n
     updateMediaMetadata(lastTitle);
     updateMediaPositionState();
   }
-  source.onended = () => { if (playbackMode === 'buffer') { isPlayingInternal = false; onPlaybackChange?.(false); } };
+  source.onended = () => {
+    if (playbackMode === 'buffer') {
+      isPlayingInternal = false;
+      onPlaybackChange?.(false);
+      onTrackEnd?.();
+    }
+  };
 }
 
 export function playStream(url: string, startAt = 0, volume = 0.5, eq: number[], rd = 1.0, rw = 0.2) {
@@ -213,7 +222,11 @@ export function playStream(url: string, startAt = 0, volume = 0.5, eq: number[],
   if (proxyAudio) proxyAudio.play().catch(() => { });
   isPlayingInternal = true;
   playbackMode = 'stream';
-  mediaElement.onended = () => { isPlayingInternal = false; onPlaybackChange?.(false); };
+  mediaElement.onended = () => {
+    isPlayingInternal = false;
+    onPlaybackChange?.(false);
+    onTrackEnd?.();
+  };
 }
 
 function immediateStop() {

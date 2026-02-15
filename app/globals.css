@@ -13,6 +13,7 @@
   --hover: rgba(255, 255, 255, 0.05);
   --shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
   --glow: 0 0 20px rgba(139, 92, 246, 0.3);
+  --glass: rgba(255, 255, 255, 0.03);
 }
 
 .light-theme {
@@ -154,17 +155,49 @@ header {
   transform: translateX(-50%);
   width: calc(100% - 48px);
   max-width: 1000px;
-  height: 88px;
+  height: 96px;
   background: rgba(15, 15, 20, 0.85);
-  backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 24px;
+  backdrop-filter: blur(32px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 28px;
   display: flex;
   align-items: center;
-  padding: 0 24px;
+  padding: 0 28px;
   gap: 24px;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
   z-index: 1000;
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+}
+
+.player-bar:hover {
+  background: rgba(20, 20, 25, 0.9);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.control-icon {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 1.2rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: 0.2s;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+}
+
+.control-icon:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.control-icon.active {
+  color: var(--accent);
+  text-shadow: var(--glow);
 }
 
 .play-btn {
@@ -349,12 +382,162 @@ header {
   .player-bar {
     width: 100%;
     bottom: 64px;
-    border-radius: 20px 20px 0 0;
+    border-radius: 24px 24px 0 0;
     left: 0;
     transform: none;
-    box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.4);
-    padding: 0 20px 20px;
-    height: 110px;
-    pointer-events: auto;
+    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.5);
+    padding: 12px 20px 24px;
+    height: auto;
+    flex-direction: column;
+    gap: 12px;
   }
+}
+
+/* Full Screen Player */
+.expanded-player {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  z-index: 3000;
+  display: flex;
+  flex-direction: column;
+  padding: 40px 24px;
+  animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow-y: auto;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+  }
+
+  to {
+    transform: translateY(0);
+  }
+}
+
+.expanded-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 40px;
+}
+
+.close-btn {
+  background: var(--glass);
+  border: 1px solid var(--border);
+  color: var(--text);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 1.5rem;
+}
+
+.expanded-art {
+  width: 100%;
+  max-width: 400px;
+  aspect-ratio: 1;
+  margin: 0 auto 40px;
+  background: var(--accent-gradient);
+  border-radius: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5), var(--glow);
+  position: relative;
+  overflow: hidden;
+}
+
+.expanded-art::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, transparent, rgba(0, 0, 0, 0.4));
+}
+
+.expanded-info {
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+.expanded-title {
+  font-size: 1.75rem;
+  font-weight: 800;
+  margin-bottom: 8px;
+  font-family: 'Lexend', sans-serif;
+}
+
+.expanded-subtitle {
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 0.9rem;
+  letter-spacing: 1px;
+}
+
+.expanded-controls {
+  margin-top: auto;
+  padding-bottom: 40px;
+  width: 100%;
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.expanded-main-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  margin-bottom: 40px;
+}
+
+.expanded-play-btn {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  background: #fff;
+  color: #000;
+  border: none;
+  font-size: 2rem;
+  display: flex;
+  align-items: center;
+  padding-left: 6px;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 10px 30px rgba(255, 255, 255, 0.2);
+}
+
+.expanded-prev-next {
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 2.5rem;
+  cursor: pointer;
+  transition: 0.2s;
+  opacity: 0.8;
+}
+
+.expanded-prev-next:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.playlist-drawer {
+  background: var(--p-bg);
+  border-top: 1px solid var(--border);
+  border-radius: 32px 32px 0 0;
+  padding: 24px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.playlist-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
 }
