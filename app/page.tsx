@@ -54,7 +54,7 @@ export default function Home() {
 
   const [eqGains, setEqGains] = useState<number[]>(new Array(10).fill(0));
   const [reverbDry, setRevDry] = useState(1.0);
-  const [reverbWet, setRevWet] = useState(0.2);
+  const [reverbWet, setRevWet] = useState(0.0);
   const [echoDelay, setEchoDelayState] = useState(0.3);
   const [echoFeedback, setEchoFeedbackState] = useState(0.3);
   const [echoWet, setEchoWetState] = useState(0.0);
@@ -67,7 +67,7 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
 
   const [presets, setPresets] = useState<Preset[]>(defaultPresets);
-  const [activePresetId, setActivePresetId] = useState<string | null>(null);
+  const [activePresetId, setActivePresetId] = useState<string | null>("flat");
   const [isMatching, setIsMatching] = useState(false);
   const [sourceTrack, setSourceTrack] = useState<Track | null>(null);
   const [targetTrack, setTargetTrack] = useState<Track | null>(null);
@@ -122,15 +122,8 @@ export default function Home() {
     if (savedSettings) {
       try {
         const s = JSON.parse(savedSettings);
-        if (s.eqGains) setEqGains(s.eqGains);
-        if (s.reverbDry !== undefined) setRevDry(s.reverbDry);
-        if (s.reverbWet !== undefined) setRevWet(s.reverbWet);
-        if (s.echoDelay !== undefined) setEchoDelayState(s.echoDelay);
-        if (s.echoFeedback !== undefined) setEchoFeedbackState(s.echoFeedback);
-        if (s.echoWet !== undefined) setEchoWetState(s.echoWet);
-        if (s.echoDry !== undefined) setEchoDryState(s.echoDry);
         if (s.volume !== undefined) setGlobalVolume(s.volume);
-        if (s.activePresetId) setActivePresetId(s.activePresetId);
+        // FX settings (eqGains, reverb, echo) are NOT loaded to ensure we start at "Flat"
         if (s.currentTrackId) {
           db.tracks.get(Number(s.currentTrackId)).then((t: any) => {
             if (t) setCurrentTrack({ id: t.id.toString(), name: t.name });
